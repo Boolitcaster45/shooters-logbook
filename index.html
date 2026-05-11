@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Logbook"/>
+  <meta name="theme-color" content="#0d0f0e"/>
+  <meta name="description" content="Shooter's Range Logbook — track firearms, sessions, malfunctions and maintenance."/>
+  <title>Shooter's Logbook</title>
+
+  <!-- PWA Manifest (inline data URI — works on GitHub Pages with no extra files) -->
+  <link rel="manifest" href="data:application/manifest+json,{%22name%22:%22Shooter%27s%20Logbook%22,%22short_name%22:%22Logbook%22,%22display%22:%22standalone%22,%22start_url%22:%22.%2F%22,%22background_color%22:%22%230d0f0e%22,%22theme_color%22:%22%230d0f0e%22,%22orientation%22:%22portrait%22,%22icons%22:[{%22src%22:%22data:image/svg+xml,%3Csvg%20xmlns%3D'http://www.w3.org/2000/svg'%20viewBox%3D'0%200%20512%20512'%3E%3Crect%20width%3D'512'%20height%3D'512'%20fill%3D'%230d0f0e'/%3E%3Ctext%20x%3D'50%25'%20y%3D'57%25'%20dominant-baseline%3D'middle'%20text-anchor%3D'middle'%20font-size%3D'320'%20fill%3D'%23c8a84b'%3E%F0%9F%8E%AF%3C/text%3E%3C/svg%3E%22,%22sizes%22:%22512x512%22,%22type%22:%22image/svg+xml%22}]}"/>
+
+  <!-- iOS home screen icon -->
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='36' fill='%230d0f0e'/><text x='90' y='105' text-anchor='middle' font-size='110' fill='%23c8a84b'>🎯</text></svg>"/>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Share+Tech+Mono&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet"/>
+
+  <!-- React 18 UMD production builds -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <!-- HTM: JSX-like tagged template literals, zero build step -->
+  <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;background:#0d0f0e}
+    body{color:#e8ead6;font-family:'Barlow',sans-serif;font-size:14px;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+    #root{min-height:100dvh}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+'use strict';
+// ── Setup ──────────────────────────────────────────────────────────────────────
+const {useState,useEffect,useMemo}=React;
+const html=htm.bind(React.createElement);
+
+// ── Storage (localStorage) ─────────────────────────────────────────────────────
+const S={
+  get(k){try{const v=localStorage.getItem('slb_'+k);return v?JSON.parse(v):null}catch{return null}},
+  set(k,v){try{localStorage.setItem('slb_'+k,JSON.stringify(v))}catch{}}
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+const uid=()=>Math.random().toString(36).slice(2,9);
+const today=()=>new Date().toISOString().slice(0,10);
+const fmtDate=d=>{if(!d)return'—';const[y,m,dy]=d.split('-');return`${m}/${dy}/${y}`};
+const yr=()=>new Date().getFullYear();
+
+// ── Theme ──────────────────────────────────────────────────────────────────────
+const G={
+  bg:'#0d0f0e',surface:'#151815',card:'#1a1d1a',
+  border:'#2a2f2a',borderB:'#3d443d',
+  accent:'#c8a84b',accentD:'#8a6f2e',
+  danger:'#c0392b',text:'#e8ead6',
+  muted:'#7a8070',dim:'#4a5040',green:'#4caf6a'
+};
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+const POSITIONS=[
+  {v:'standing',l:'Standing (Unsupported)'},{v:'offhand',l:'Offhand'},
+  {v:'kneeling',l:'Kneeling'},{v:'kneeling_sup',l:'Kneeling (Supported)'},
+  {v:'sitting',l:'Sitting'},{v:'sitting_sup',l:'Sitting (Supported)'},
+  {v:'prone',l:'Prone'},{v:'prone_sup',l:'Prone (Supported / Bipod)'},
+  {v:'bench',l:'Benchrest'},{v:'barricade',l:'Barricade / Barrier'},
+  {v:'rollover_prone',l:'Rollover Prone'},{v:'urban_prone',l:'Urban Prone'},
+  {v:'vehicle',l:'Vehicle / Vehicular'},{v:'mixed',l:'Mixed / Multiple'},
+];
+const MAL_TYPES=[
+  {v:'FTF_feed',l:'Failure to Feed (FTF)'},{v:'FTF_fire',l:'Failure to Fire'},
+  {v:'FTE',l:'Failure to Eject (FTE)'},{v:'stovepipe',l:'Stovepipe'},
+  {v:'double_feed',l:'Double Feed'},{v:'squib',l:'Squib Load'},
+  {v:'hangfire',l:'Hang Fire'},{v:'FTX',l:'Failure to Extract'},
+  {v:'misfire',l:'Misfire / Light Strike'},{v:'mag',l:'Magazine Issue'},
+  {v:'other',l:'Other'},
+];
+const MAL_CAUSES=[
+  'Ammunition (underpowered / defective)','Dirty / fouled chamber',
+  'Dirty / fouled extractor','Weak extractor spring','Weak recoil spring',
+  'Weak magazine spring','Damaged magazine / feed lips','Limp wristing',
+  'Insufficient lubrication','Light primer strike','Worn / damaged ejector',
+  'Case rim rupture','User / grip error','Unknown','Other',
+];
+const WEATHER=['Clear','Overcast','Rain','Wind','Cold','Hot','Indoor'];
+const DEFAULT_FA=[
+  {id:'fa1',make:'Glock',model:'19',caliber:'9mm',serial:'',type:'Pistol',notes:'Gen 5',pmcsSchedule:[]},
+  {id:'fa2',make:'Colt',model:'1911',caliber:'.45 ACP',serial:'',type:'Pistol',notes:'',pmcsSchedule:[]},
+];
+const BLANK_GUN=()=>({id:uid(),firearmsId:'',rounds:0,ammoLoad:'',distance:'',targetType:'',position:'',notes:'',malfunctionLog:[],score:''});
+
+// ── CSS string ─────────────────────────────────────────────────────────────────
+const CSS=`
+.app{max-width:900px;margin:0 auto;padding:0 0 100px}
+.hdr{background:${G.surface};border-bottom:2px solid ${G.accent};padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 12px;display:flex;align-items:flex-end;gap:14px;position:sticky;top:0;z-index:100}
+.hdr-logo{font-family:'Oswald',sans-serif;font-size:22px;font-weight:700;letter-spacing:3px;color:${G.accent};text-transform:uppercase;line-height:1}
+.hdr-sub{font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.muted};letter-spacing:2px;margin-bottom:2px}
+.hdr-stats{margin-left:auto;display:flex;gap:18px;align-items:flex-end}
+.sb{text-align:right}.sn{font-family:'Share Tech Mono',monospace;font-size:19px;color:${G.accent};line-height:1}
+.sl{font-size:9px;letter-spacing:2px;color:${G.muted};text-transform:uppercase;margin-top:2px}
+.nav{display:flex;border-bottom:1px solid ${G.border};background:${G.surface};position:sticky;top:59px;z-index:99}
+.nt{padding:11px 0;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:${G.muted};cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;margin-bottom:-1px;flex:1;transition:color 0.15s}
+.nt.on{color:${G.accent};border-bottom-color:${G.accent}}
+.pg{padding:14px}
+.st{font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:${G.muted};border-bottom:1px solid ${G.border};padding-bottom:7px;margin-bottom:14px}
+.card{background:${G.card};border:1px solid ${G.border};border-radius:2px;margin-bottom:9px;overflow:hidden}
+.ch{display:flex;align-items:center;padding:11px 13px;gap:9px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.ch:active{background:rgba(255,255,255,0.03)}
+.cb{padding:13px;border-top:1px solid ${G.border}}
+label{display:block;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${G.muted};margin-bottom:5px}
+input,select,textarea{width:100%;background:${G.bg};border:1px solid ${G.border};border-radius:1px;color:${G.text};font-family:'Barlow',sans-serif;font-size:16px;padding:10px 11px;outline:none;transition:border-color 0.15s;-webkit-appearance:none;appearance:none}
+input:focus,select:focus,textarea:focus{border-color:${G.accent}}
+select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237a8070' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:28px}
+textarea{resize:vertical;min-height:65px;font-size:14px}
+.fr{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:9px}
+.fc{display:flex;flex-direction:column;margin-bottom:9px}
+.btn{font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;padding:10px 15px;border:none;border-radius:1px;cursor:pointer;transition:all 0.15s}
+.bp{background:${G.accent};color:#0d0f0e;font-weight:600}.bp:active{background:#d4b55e}
+.bg{background:transparent;border:1px solid ${G.border};color:${G.muted}}.bg:active{border-color:${G.borderB};color:${G.text}}
+.bd{background:transparent;border:1px solid ${G.danger}44;color:${G.danger};font-size:11px;padding:6px 11px}
+.bsm{padding:6px 11px;font-size:11px}
+.badd{background:transparent;border:1px dashed ${G.accentD};color:${G.accentD};width:100%;padding:10px;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;cursor:pointer;border-radius:1px;transition:all 0.15s}
+.badd:active{border-color:${G.accent};color:${G.accent}}
+.ftag{font-family:'Oswald',sans-serif;font-size:14px;font-weight:600;letter-spacing:1px;color:${G.text};flex:1}
+.fcal{font-family:'Share Tech Mono',monospace;font-size:11px;color:${G.accent};background:${G.accent}18;padding:3px 7px;border:1px solid ${G.accent}33;border-radius:1px}
+.frds{font-family:'Share Tech Mono',monospace;font-size:11px;color:${G.muted}}
+.sc{background:${G.card};border:1px solid ${G.border};border-left:3px solid ${G.accentD};border-radius:2px;margin-bottom:8px;overflow:hidden}
+.sdt{font-family:'Share Tech Mono',monospace;font-size:12px;color:${G.accent}}
+.sloc{font-size:12px;color:${G.muted};margin-left:4px}
+.sgp{font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.dim};margin-top:2px}
+.ge{background:${G.bg};border:1px solid ${G.border};border-radius:1px;padding:10px;margin-bottom:7px}
+.gn{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1px;color:${G.text}}
+.rb{font-family:'Share Tech Mono',monospace;font-size:10px;background:${G.accent}15;border:1px solid ${G.accent}30;color:${G.accent};padding:2px 7px;border-radius:1px}
+.conds{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.cbdg{font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.muted};background:${G.surface};border:1px solid ${G.border};padding:2px 6px;border-radius:1px}
+.ar{display:grid;grid-template-columns:2fr 1fr 1fr;gap:7px;margin-bottom:9px}
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:18px}
+.scard{background:${G.card};border:1px solid ${G.border};padding:13px;border-radius:2px;text-align:center}
+.scn{font-family:'Share Tech Mono',monospace;font-size:24px;color:${G.accent};line-height:1;margin-bottom:4px}
+.scl{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:${G.muted}}
+.frow{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid ${G.border}}
+.frow:last-child{border-bottom:none}
+.bw{height:4px;background:${G.border};border-radius:2px;margin-top:5px;overflow:hidden}
+.bf{height:100%;background:${G.accent};border-radius:2px;transition:width 0.5s ease}
+.empty{text-align:center;padding:34px 18px;color:${G.dim};font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px}
+.dvd{height:1px;background:${G.border};margin:13px 0}
+.mbg{position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:200;display:flex;align-items:flex-end;justify-content:center}
+.modal{background:${G.surface};border-top:2px solid ${G.accent};border:1px solid ${G.border};border-bottom:none;width:100%;max-width:640px;max-height:92dvh;overflow-y:auto;border-radius:8px 8px 0 0;padding:18px 15px calc(env(safe-area-inset-bottom,0px) + 18px)}
+.mtitle{font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:3px;text-transform:uppercase;color:${G.accent};margin-bottom:16px;padding-bottom:10px;border-bottom:1px solid ${G.border}}
+.mact{display:flex;gap:9px;justify-content:flex-end;margin-top:16px;padding-top:13px;border-top:1px solid ${G.border}}
+.tag{font-family:'Share Tech Mono',monospace;font-size:10px;padding:4px 8px;border-radius:1px;border:1px solid ${G.border};color:${G.muted};cursor:pointer;user-select:none;-webkit-user-select:none;transition:all 0.12s}
+.tag.on{background:${G.accent}22;border-color:${G.accent};color:${G.accent}}
+.chevron{color:${G.dim};font-size:11px}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:${G.bg}}::-webkit-scrollbar-thumb{background:${G.border};border-radius:2px}
+@media(max-width:480px){.fr{grid-template-columns:1fr}.sgrid{grid-template-columns:1fr 1fr}.ar{grid-template-columns:1fr 1fr}.hdr-stats{display:none}}
+`;
+
+// ── GunEntryForm ───────────────────────────────────────────────────────────────
+function GunEntryForm({firearms,entry,onChange,onRemove}){
+  const fa=firearms.find(f=>f.id===entry.firearmsId);
+  const upd=ch=>onChange({...entry,...ch});
+  return html`
+    <div class="ge">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">
+        <span class="gn">${fa?`${fa.make} ${fa.model}`:'— Select Firearm —'}</span>
+        <button class="btn bd" onClick=${onRemove}>✕</button>
+      </div>
+      <div class="fr">
+        <div class="fc" style="margin-bottom:0"><label>Firearm</label>
+          <select value=${entry.firearmsId} onChange=${e=>upd({firearmsId:e.target.value})}>
+            <option value="">-- Select --</option>
+            ${firearms.map(f=>html`<option key=${f.id} value=${f.id}>${f.make} ${f.model} (${f.caliber})</option>`)}
+          </select></div>
+        <div class="fc" style="margin-bottom:0"><label>Rounds Fired</label>
+          <input type="number" min="0" value=${entry.rounds} onChange=${e=>upd({rounds:parseInt(e.target.value)||0})}/></div>
+      </div>
+      <div class="ar">
+        <div class="fc" style="margin-bottom:0"><label>Ammo / Load</label>
+          <input type="text" placeholder="e.g. Speer 124gr" value=${entry.ammoLoad} onChange=${e=>upd({ammoLoad:e.target.value})}/></div>
+        <div class="fc" style="margin-bottom:0"><label>Dist (yds)</label>
+          <input type="number" min="0" value=${entry.distance} onChange=${e=>upd({distance:e.target.value})}/></div>
+        <div class="fc" style="margin-bottom:0"><label>Target</label>
+          <select value=${entry.targetType} onChange=${e=>upd({targetType:e.target.value})}>
+            <option value="">—</option>
+            ${['Paper','Steel','IPSC/USPSA','IDPA','Silhouette','3-Gun','Other'].map(t=>html`<option key=${t}>${t}</option>`)}
+          </select></div>
+      </div>
+      <div class="fr">
+        <div class="fc" style="margin-bottom:0"><label>Firing Position</label>
+          <select value=${entry.position||''} onChange=${e=>upd({position:e.target.value})}>
+            <option value="">— Select —</option>
+            ${POSITIONS.map(p=>html`<option key=${p.v} value=${p.v}>${p.l}</option>`)}
+          </select></div>
+        <div class="fc" style="margin-bottom:0"><label>Score / Group</label>
+          <input type="text" placeholder='e.g. 1.5" group, 85/100' value=${entry.score} onChange=${e=>upd({score:e.target.value})}/></div>
+      </div>
+      <div class="fc"><label>Performance Notes</label>
+        <textarea rows="2" placeholder="Groups, drills, observations..." value=${entry.notes} onChange=${e=>upd({notes:e.target.value})}></textarea></div>
+
+      <!-- Malfunction Log -->
+      <div style="margin-top:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+          <label style="margin:0">Malfunctions (${(entry.malfunctionLog||[]).filter(m=>m.tracked!==false).length} tracked / ${(entry.malfunctionLog||[]).length} total)</label>
+          <button class="btn bg bsm" onClick=${()=>upd({malfunctionLog:[...(entry.malfunctionLog||[]),{id:uid(),type:'',cause:'',notes:'',tracked:true}]})}>+ Add</button>
+        </div>
+        ${(entry.malfunctionLog||[]).map((mal,mi)=>{
+          const isT=mal.tracked!==false;
+          const updM=ch=>{const u=[...(entry.malfunctionLog||[])];u[mi]={...mal,...ch};upd({malfunctionLog:u})};
+          return html`
+            <div key=${mal.id} style="background:${isT?G.danger+'10':G.dim+'0d'};border:1px solid ${isT?G.danger+'33':G.border};border-radius:1px;padding:9px;margin-bottom:7px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+                <div onClick=${()=>updM({tracked:!isT})} style="display:flex;align-items:center;gap:7px;cursor:pointer;background:${isT?G.danger+'22':G.dim+'22'};border:1px solid ${isT?G.danger+'55':G.border};border-radius:2px;padding:5px 9px;user-select:none;-webkit-user-select:none">
+                  <div style="width:9px;height:9px;border-radius:50%;background:${isT?G.danger:G.dim};flex-shrink:0"></div>
+                  <span style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:${isT?G.danger:G.muted}">${isT?'Tracked Against Gun':'Noted Only'}</span>
+                </div>
+                <button class="btn bd" style="padding:4px 8px;font-size:11px" onClick=${()=>upd({malfunctionLog:(entry.malfunctionLog||[]).filter((_,i)=>i!==mi)})}>✕</button>
+              </div>
+              ${!isT&&html`<div style="font-size:11px;color:${G.muted};font-style:italic;margin-bottom:7px">Noted in session only — not counted against gun reliability.</div>`}
+              <div class="fr">
+                <div class="fc" style="margin-bottom:0"><label>Type</label>
+                  <select value=${mal.type} onChange=${e=>updM({type:e.target.value})}>
+                    <option value="">-- Type --</option>
+                    ${MAL_TYPES.map(t=>html`<option key=${t.v} value=${t.v}>${t.l}</option>`)}
+                  </select></div>
+                <div class="fc" style="margin-bottom:0"><label>Probable Cause</label>
+                  <select value=${mal.cause} onChange=${e=>updM({cause:e.target.value})}>
+                    <option value="">-- Cause --</option>
+                    ${MAL_CAUSES.map(c=>html`<option key=${c}>${c}</option>`)}
+                  </select></div>
+              </div>
+              <div class="fc" style="margin-top:7px;margin-bottom:0"><label>Notes</label>
+                <input type="text" placeholder="What happened, how cleared..." value=${mal.notes} onChange=${e=>updM({notes:e.target.value})}/></div>
+            </div>`;
+        })}
+      </div>
+    </div>`;
+}
+
+// ── SessionModal ───────────────────────────────────────────────────────────────
+function SessionModal({firearms,existing,onSave,onClose}){
+  const [date,setDate]=useState(existing?.date||today());
+  const [loc,setLoc]=useState(existing?.location||'');
+  const [wx,setWx]=useState(existing?.weather||[]);
+  const [notes,setNotes]=useState(existing?.notes||'');
+  const [guns,setGuns]=useState(existing?.gunEntries||[BLANK_GUN()]);
+  const tog=(arr,set,v)=>set(arr.includes(v)?arr.filter(x=>x!==v):[...arr,v]);
+  const addGun=()=>setGuns([...guns,BLANK_GUN()]);
+  const totalRds=guns.reduce((s,e)=>s+(parseInt(e.rounds)||0),0);
+  const save=()=>{onSave({id:existing?.id||uid(),date,location:loc,weather:wx,notes,gunEntries:guns});onClose()};
+  return html`
+    <div class="mbg" onClick=${e=>e.target===e.currentTarget&&onClose()}>
+      <div class="modal">
+        <div class="mtitle">${existing?'Edit Session':'New Range Session'}</div>
+        <div class="fr">
+          <div class="fc" style="margin-bottom:0"><label>Date</label><input type="date" value=${date} onChange=${e=>setDate(e.target.value)}/></div>
+          <div class="fc" style="margin-bottom:0"><label>Location / Range</label><input type="text" placeholder="Range name..." value=${loc} onChange=${e=>setLoc(e.target.value)}/></div>
+        </div>
+        <div class="fc" style="margin-top:9px"><label>Conditions</label>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            ${WEATHER.map(w=>html`<span key=${w} class=${'tag'+(wx.includes(w)?' on':'')} onClick=${()=>tog(wx,setWx,w)}>${w}</span>`)}
+          </div></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 9px">
+          <div class="st" style="margin:0;border:none;padding:0">Firearms</div>
+          <span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:${G.accent}">${totalRds} rds</span>
+        </div>
+        ${guns.map((e,i)=>html`<${GunEntryForm} key=${e.id} firearms=${firearms} entry=${e} onChange=${u=>setGuns(guns.map((g,gi)=>gi===i?u:g))} onRemove=${()=>setGuns(guns.filter((_,gi)=>gi!==i))}/>`)}
+        <button class="badd" style="margin-bottom:13px" onClick=${addGun}>+ Add Firearm</button>
+        <div class="fc"><label>Session Notes</label><textarea placeholder="Overall notes, things to work on..." value=${notes} onChange=${e=>setNotes(e.target.value)}></textarea></div>
+        <div class="mact">
+          <button class="btn bg" onClick=${onClose}>Cancel</button>
+          <button class="btn bp" onClick=${save}>Save Session</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── FirearmModal ───────────────────────────────────────────────────────────────
+function FirearmModal({existing,onSave,onClose}){
+  const [make,setMake]=useState(existing?.make||'');
+  const [model,setModel]=useState(existing?.model||'');
+  const [cal,setCal]=useState(existing?.caliber||'');
+  const [ser,setSer]=useState(existing?.serial||'');
+  const [type,setType]=useState(existing?.type||'');
+  const [notes,setNotes]=useState(existing?.notes||'');
+  const [pmcs,setPmcs]=useState(existing?.pmcsSchedule||[]);
+  const addP=()=>setPmcs([...pmcs,{id:uid(),interval:500,task:'',lastServicedAt:0}]);
+  const updP=(i,ch)=>setPmcs(pmcs.map((p,pi)=>pi===i?{...p,...ch}:p));
+  const remP=(i)=>setPmcs(pmcs.filter((_,pi)=>pi!==i));
+  const save=()=>{if(!make||!model)return;onSave({id:existing?.id||uid(),make,model,caliber:cal,serial:ser,type,notes,pmcsSchedule:pmcs});onClose()};
+  return html`
+    <div class="mbg" onClick=${e=>e.target===e.currentTarget&&onClose()}>
+      <div class="modal">
+        <div class="mtitle">${existing?'Edit Firearm':'Register Firearm'}</div>
+        <div class="fr">
+          <div class="fc" style="margin-bottom:0"><label>Make *</label><input value=${make} onInput=${e=>setMake(e.target.value)} placeholder="Glock, Ruger, S&W..."/></div>
+          <div class="fc" style="margin-bottom:0"><label>Model *</label><input value=${model} onInput=${e=>setModel(e.target.value)} placeholder="19, 10/22, M&P9..."/></div>
+        </div>
+        <div class="fr" style="margin-top:9px">
+          <div class="fc" style="margin-bottom:0"><label>Caliber</label><input value=${cal} onInput=${e=>setCal(e.target.value)} placeholder="9mm, .45 ACP..."/></div>
+          <div class="fc" style="margin-bottom:0"><label>Type</label>
+            <select value=${type} onChange=${e=>setType(e.target.value)}>
+              <option value="">—</option>
+              ${['Pistol','Revolver','Rifle','Shotgun','PCC','Suppressed'].map(t=>html`<option key=${t}>${t}</option>`)}
+            </select></div>
+        </div>
+        <div class="fc"><label>Serial # (optional)</label><input value=${ser} onInput=${e=>setSer(e.target.value)} placeholder="For records"/></div>
+        <div class="fc"><label>Notes / Mods</label><input value=${notes} onInput=${e=>setNotes(e.target.value)} placeholder="Optics, trigger, Gen, etc."/></div>
+        <div style="border-top:1px solid ${G.border};padding-top:13px;margin-top:4px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">
+            <div style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:${G.muted}">PMCS Schedule</div>
+            <button class="btn bg bsm" onClick=${addP}>+ Add</button>
+          </div>
+          ${pmcs.length===0&&html`<div style="font-size:12px;color:${G.dim};font-style:italic;margin-bottom:7px">No maintenance intervals set.</div>`}
+          ${pmcs.map((p,i)=>html`
+            <div key=${p.id} style="background:${G.bg};border:1px solid ${G.border};border-radius:1px;padding:9px;margin-bottom:7px">
+              <div style="display:flex;gap:7px;align-items:flex-end">
+                <div class="fc" style="width:115px;flex-shrink:0;margin-bottom:0"><label>Every (rds)</label>
+                  <input type="number" min="1" value=${p.interval} onChange=${e=>updP(i,{interval:parseInt(e.target.value)||0})} placeholder="500"/></div>
+                <div class="fc" style="flex:1;margin-bottom:0"><label>Maintenance Task</label>
+                  <input type="text" value=${p.task} onInput=${e=>updP(i,{task:e.target.value})} placeholder="Clean & lube, inspect spring..."/></div>
+                <button class="btn bd" style="padding:10px 9px;flex-shrink:0" onClick=${()=>remP(i)}>✕</button>
+              </div>
+            </div>`)}
+        </div>
+        <div class="mact">
+          <button class="btn bg" onClick=${onClose}>Cancel</button>
+          <button class="btn bp" onClick=${save}>Save Firearm</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Main App ───────────────────────────────────────────────────────────────────
+function App(){
+  const [tab,setTab]=useState('stats');
+  const [firearms,setFA]=useState([]);
+  const [sessions,setSE]=useState([]);
+  const [loaded,setLoaded]=useState(false);
+  const [showSess,setShowSess]=useState(false);
+  const [editSess,setEditSess]=useState(null);
+  const [showFA,setShowFA]=useState(false);
+  const [editFA,setEditFA]=useState(null);
+  const [openSess,setOpenSess]=useState(null);
+  const [openFA,setOpenFA]=useState(null);
+  const [statSub,setStatSub]=useState('overview');
+
+  useEffect(()=>{
+    setFA(S.get('firearms')??DEFAULT_FA);
+    setSE(S.get('sessions')??[]);
+    setLoaded(true);
+  },[]);
+  useEffect(()=>{if(loaded)S.set('firearms',firearms)},[firearms,loaded]);
+  useEffect(()=>{if(loaded)S.set('sessions',sessions)},[sessions,loaded]);
+
+  // ── Computed ──
+  const lifeRds=useMemo(()=>sessions.reduce((s,se)=>s+se.gunEntries.reduce((a,g)=>a+(parseInt(g.rounds)||0),0),0),[sessions]);
+  const yrRds=useMemo(()=>{const y=String(yr());return sessions.filter(s=>s.date?.startsWith(y)).reduce((s,se)=>s+se.gunEntries.reduce((a,g)=>a+(parseInt(g.rounds)||0),0),0)},[sessions]);
+  const yrSess=useMemo(()=>sessions.filter(s=>s.date?.startsWith(String(yr()))).length,[sessions]);
+
+  const rdsByFA=useMemo(()=>{const m={};sessions.forEach(se=>se.gunEntries.forEach(g=>{if(!g.firearmsId)return;m[g.firearmsId]=(m[g.firearmsId]||0)+(parseInt(g.rounds)||0)}));return m},[sessions]);
+  const rdsByFAYr=useMemo(()=>{const y=String(yr());const m={};sessions.filter(s=>s.date?.startsWith(y)).forEach(se=>se.gunEntries.forEach(g=>{if(!g.firearmsId)return;m[g.firearmsId]=(m[g.firearmsId]||0)+(parseInt(g.rounds)||0)}));return m},[sessions]);
+  const maxRds=useMemo(()=>Math.max(1,...Object.values(rdsByFA)),[rdsByFA]);
+
+  const malByFA=useMemo(()=>{const m={};sessions.forEach(se=>se.gunEntries.forEach(g=>{if(!g.firearmsId)return;const t=(g.malfunctionLog||[]).filter(mal=>mal.tracked!==false).length+(g.malfunctions||0);m[g.firearmsId]=(m[g.firearmsId]||0)+t}));return m},[sessions]);
+
+  const mrbsByFA=useMemo(()=>{const m={};firearms.forEach(f=>{const r=rdsByFA[f.id]||0;const mal=malByFA[f.id]||0;m[f.id]=mal>0?Math.round(r/mal):null});return m},[firearms,rdsByFA,malByFA]);
+
+  const l1kByFA=useMemo(()=>{
+    const m={};
+    firearms.forEach(f=>{
+      const ents=[];
+      [...sessions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(se=>se.gunEntries.forEach(g=>{
+        if(g.firearmsId!==f.id)return;
+        ents.push({rds:parseInt(g.rounds)||0,t:(g.malfunctionLog||[]).filter(mal=>mal.tracked!==false).length+(g.malfunctions||0)});
+      }));
+      let cum=0;const blks=ents.map(e=>{cum+=e.rds;return{end:cum,t:e.t}});
+      const cut=cum-1000;let cnt=0;blks.forEach(b=>{if(b.end>cut)cnt+=b.t});
+      m[f.id]=cum>=1000?cnt:null;
+    });
+    return m;
+  },[firearms,sessions]);
+
+  const rdsByPos=useMemo(()=>{const m={};sessions.forEach(se=>se.gunEntries.forEach(g=>{const p=g.position||'unspecified';m[p]=(m[p]||0)+(parseInt(g.rounds)||0)}));return m},[sessions]);
+  const sessByPos=useMemo(()=>{const m={};sessions.forEach(se=>se.gunEntries.forEach(g=>{const p=g.position||'unspecified';if(!m[p])m[p]=new Set();m[p].add(se.id)}));return Object.fromEntries(Object.entries(m).map(([k,v])=>[k,v.size]))},[sessions]);
+  const maxPosRds=useMemo(()=>Math.max(1,...Object.values(rdsByPos)),[rdsByPos]);
+
+  const pmcsAlerts=useMemo(()=>{
+    const a=[];
+    firearms.forEach(f=>(f.pmcsSchedule||[]).forEach(p=>{
+      if(!p.interval||!p.task)return;
+      const tot=rdsByFA[f.id]||0,since=tot-(p.lastServicedAt||0),isDue=since>=p.interval,pct=Math.min(100,Math.round((since/p.interval)*100));
+      a.push({fId:f.id,pId:p.id,f,task:p.task,interval:p.interval,since,isDue,left:p.interval-since,pct});
+    }));
+    return a;
+  },[firearms,rdsByFA]);
+  const dueAlerts=useMemo(()=>pmcsAlerts.filter(a=>a.isDue),[pmcsAlerts]);
+
+  // ── Handlers ──
+  const saveSess=s=>setSE(prev=>{const i=prev.findIndex(x=>x.id===s.id);if(i>=0){const n=[...prev];n[i]=s;return n}return[s,...prev]});
+  const delSess=id=>setSE(prev=>prev.filter(s=>s.id!==id));
+  const saveFA=f=>setFA(prev=>{const i=prev.findIndex(x=>x.id===f.id);if(i>=0){const n=[...prev];n[i]=f;return n}return[...prev,f]});
+  const delFA=id=>setFA(prev=>prev.filter(f=>f.id!==id));
+  const markSvc=(fId,pId)=>setFA(prev=>prev.map(f=>f.id!==fId?f:{...f,pmcsSchedule:(f.pmcsSchedule||[]).map(p=>p.id!==pId?p:{...p,lastServicedAt:rdsByFA[fId]||0})}));
+  const sorted=useMemo(()=>[...sessions].sort((a,b)=>b.date?.localeCompare(a.date)),[sessions]);
+
+  if(!loaded)return html`<div style="color:${G.muted};text-align:center;padding:60px;font-family:'Share Tech Mono',monospace;letter-spacing:2px">LOADING...</div>`;
+
+  return html`
+    <>
+      <style>${CSS}</style>
+      <div class="app">
+
+        <!-- Header -->
+        <div class="hdr">
+          <div><div class="hdr-sub">SHOOTER'S</div><div class="hdr-logo">LOGBOOK</div></div>
+          <div class="hdr-stats">
+            <div class="sb"><div class="sn">${yrRds.toLocaleString()}</div><div class="sl">Rds ${yr()}</div></div>
+            <div class="sb"><div class="sn">${lifeRds.toLocaleString()}</div><div class="sl">Lifetime</div></div>
+          </div>
+        </div>
+
+        <!-- Nav -->
+        <div class="nav">
+          ${[['stats','Stats'],['log','Log'],['firearms','Arms']].map(([k,l])=>html`
+            <button key=${k} class=${'nt'+(tab===k?' on':'')} onClick=${()=>setTab(k)}>
+              ${l}${k==='firearms'&&dueAlerts.length>0?html`<span style="display:inline-block;margin-left:5px;background:${G.accent};color:${G.bg};font-family:'Share Tech Mono',monospace;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;line-height:16px;vertical-align:middle">${dueAlerts.length}</span>`:''}
+            </button>`)}
+        </div>
+
+        <!-- PMCS Alert Banner -->
+        ${dueAlerts.length>0&&html`
+          <div style="background:${G.accent}12;border-bottom:2px solid ${G.accent};padding:10px 15px">
+            <div style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:3px;color:${G.accent};text-transform:uppercase;margin-bottom:6px">⚙ ${dueAlerts.length} PMCS Item${dueAlerts.length!==1?'s':''} Due</div>
+            ${dueAlerts.map((a,i)=>html`
+              <div key=${i} style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${i<dueAlerts.length-1?'5px':'0'}">
+                <div style="flex:1;min-width:0;overflow:hidden">
+                  <span style="font-family:'Oswald',sans-serif;font-size:13px;color:${G.text}">${a.f.make} ${a.f.model}</span>
+                  <span style="font-size:12px;color:${G.muted};margin-left:5px">— ${a.task}</span>
+                </div>
+                <button class="btn bg bsm" style="flex-shrink:0;margin-left:9px" onClick=${()=>{markSvc(a.fId,a.pId);setTab('firearms')}}>Done</button>
+              </div>`)}
+          </div>`}
+
+        <!-- Range Log -->
+        ${tab==='log'&&html`
+          <div class="pg">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:13px">
+              <div class="st" style="margin:0;border:none;padding:0">RANGE SESSIONS</div>
+              <button class="btn bp" onClick=${()=>{setEditSess(null);setShowSess(true)}}>+ New</button>
+            </div>
+            ${sorted.length===0&&html`<div class="empty">NO SESSIONS LOGGED<br/>TAP "+ NEW" TO BEGIN</div>`}
+            ${sorted.map(s=>{
+              const tRds=s.gunEntries.reduce((a,g)=>a+(parseInt(g.rounds)||0),0);
+              const isOpen=openSess===s.id;
+              return html`
+                <div key=${s.id} class="sc">
+                  <div class="ch" onClick=${()=>setOpenSess(isOpen?null:s.id)}>
+                    <span class="chevron">${isOpen?'▾':'▸'}</span>
+                    <div style="flex:1">
+                      <div style="display:flex;align-items:center;gap:5px">
+                        <span class="sdt">${fmtDate(s.date)}</span>
+                        ${s.location&&html`<span class="sloc">— ${s.location}</span>`}
+                      </div>
+                      <div class="sgp">${s.gunEntries.filter(g=>g.firearmsId).map(g=>{const fa=firearms.find(f=>f.id===g.firearmsId);return fa?`${fa.make} ${fa.model} (${g.rounds}rds)`:''}).filter(Boolean).join(' · ')||'No firearms logged'}</div>
+                    </div>
+                    <span class="rb">${tRds} rds</span>
+                  </div>
+                  ${isOpen&&html`
+                    <div class="cb">
+                      ${s.weather?.length>0&&html`<div class="conds" style="margin-bottom:9px">${s.weather.map(w=>html`<span key=${w} class="cbdg">🌤 ${w}</span>`)}</div>`}
+                      ${s.gunEntries.map((g,i)=>{
+                        const fa=firearms.find(f=>f.id===g.firearmsId);
+                        const mc=(g.malfunctionLog||[]).length+(g.malfunctions||0);
+                        return html`
+                          <div key=${i} class="ge">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+                              <span class="gn">${fa?`${fa.make} ${fa.model}`:'—'}</span>
+                              <span class="rb">${g.rounds} rds</span>
+                            </div>
+                            ${g.ammoLoad&&html`<div style="font-size:12px;color:${G.muted};margin-bottom:3px">Ammo: ${g.ammoLoad}</div>`}
+                            ${g.distance&&html`<div style="font-size:12px;color:${G.muted};margin-bottom:3px">Distance: ${g.distance} yds</div>`}
+                            ${g.position&&html`<div style="font-size:12px;color:${G.muted};margin-bottom:3px">Position: ${POSITIONS.find(p=>p.v===g.position)?.l||g.position}</div>`}
+                            ${g.targetType&&html`<div style="font-size:12px;color:${G.muted};margin-bottom:3px">Target: ${g.targetType}</div>`}
+                            ${g.score&&html`<div style="font-size:12px;color:${G.accent};margin-bottom:3px">Score/Group: ${g.score}</div>`}
+                            ${mc>0&&html`
+                              <div style="margin-top:5px">
+                                <div style="font-size:11px;letter-spacing:2px;color:${G.danger};margin-bottom:3px;text-transform:uppercase">
+                                  ⚠ ${mc} Malfunction${mc!==1?'s':''}${(()=>{const t=(g.malfunctionLog||[]).filter(m=>m.tracked!==false).length;return t<mc?` (${t} tracked)`:''})()}
+                                </div>
+                                ${(g.malfunctionLog||[]).map((mal,mi)=>{
+                                  const td=MAL_TYPES.find(t=>t.v===mal.type);const isT=mal.tracked!==false;
+                                  return html`
+                                    <div key=${mi} style="font-size:11px;color:${isT?G.danger:G.muted};background:${isT?G.danger+'0d':G.dim+'0d'};border:1px solid ${isT?G.danger+'22':G.border};border-radius:1px;padding:3px 7px;margin-bottom:3px">
+                                      <div style="display:flex;align-items:center;gap:5px">
+                                        <span style="font-weight:600">${td?.l||mal.type||'Unknown'}</span>
+                                        <span style="font-size:9px;letter-spacing:1px;text-transform:uppercase;color:${isT?G.danger:G.dim};background:${isT?G.danger+'20':G.dim+'20'};padding:1px 4px;border-radius:1px">${isT?'TRACKED':'NOTED'}</span>
+                                      </div>
+                                      ${mal.cause&&html`<div style="color:${G.muted};margin-top:2px">${mal.cause}</div>`}
+                                      ${mal.notes&&html`<div style="color:${G.muted};font-style:italic;margin-top:2px">${mal.notes}</div>`}
+                                    </div>`})}
+                              </div>`}
+                            ${g.notes&&html`<div style="font-size:12px;color:${G.muted};font-style:italic;margin-top:5px">${g.notes}</div>`}
+                          </div>`})}
+                      ${s.notes&&html`<div style="margin-top:7px;padding:9px;background:${G.surface};border-left:2px solid ${G.accentD};font-size:12px;color:${G.muted};font-style:italic">${s.notes}</div>`}
+                      <div style="display:flex;gap:7px;margin-top:9px">
+                        <button class="btn bg bsm" onClick=${()=>{setEditSess(s);setShowSess(true)}}>Edit</button>
+                        <button class="btn bd" onClick=${()=>delSess(s.id)}>Delete</button>
+                      </div>
+                    </div>`}
+                </div>`})}
+          </div>`}
+
+        <!-- Firearms -->
+        ${tab==='firearms'&&html`
+          <div class="pg">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:13px">
+              <div class="st" style="margin:0;border:none;padding:0">REGISTERED FIREARMS</div>
+              <button class="btn bp" onClick=${()=>{setEditFA(null);setShowFA(true)}}>+ Add</button>
+            </div>
+            ${firearms.length===0&&html`<div class="empty">NO FIREARMS REGISTERED</div>`}
+            ${firearms.map(f=>{
+              const tot=rdsByFA[f.id]||0,yrR=rdsByFAYr[f.id]||0,isOpen=openFA===f.id;
+              const hasDue=(f.pmcsSchedule||[]).some(p=>pmcsAlerts.find(a=>a.fId===f.id&&a.pId===p.id&&a.isDue));
+              return html`
+                <div key=${f.id} class="card" style=${hasDue?`border-color:${G.accent}55`:''}>
+                  <div class="ch" onClick=${()=>setOpenFA(isOpen?null:f.id)}>
+                    <span class="chevron">${isOpen?'▾':'▸'}</span>
+                    <div style="flex:1">
+                      <div style="display:flex;align-items:center;gap:7px">
+                        <div class="ftag">${f.make} ${f.model}</div>
+                        ${hasDue&&html`<span style="font-size:9px;letter-spacing:1px;color:${G.accent};background:${G.accent}20;border:1px solid ${G.accent}44;padding:2px 5px;border-radius:2px;text-transform:uppercase;font-family:'Oswald',sans-serif">PMCS DUE</span>`}
+                      </div>
+                      <div style="font-size:10px;color:${G.dim};margin-top:2px;font-family:'Share Tech Mono',monospace">${f.type||'—'}${f.serial?` · SN: ${f.serial}`:''}</div>
+                    </div>
+                    <span class="fcal">${f.caliber}</span>
+                    <span class="frds">${tot.toLocaleString()} rds</span>
+                  </div>
+                  ${isOpen&&html`
+                    <div class="cb">
+                      <div class="fr">
+                        <div><div style="font-size:10px;letter-spacing:2px;color:${G.muted};text-transform:uppercase;margin-bottom:3px">Rounds This Year</div><div style="font-family:'Share Tech Mono',monospace;font-size:20px;color:${G.accent}">${yrR.toLocaleString()}</div></div>
+                        <div><div style="font-size:10px;letter-spacing:2px;color:${G.muted};text-transform:uppercase;margin-bottom:3px">Lifetime Rounds</div><div style="font-family:'Share Tech Mono',monospace;font-size:20px;color:${G.accent}">${tot.toLocaleString()}</div></div>
+                        <div><div style="font-size:10px;letter-spacing:2px;color:${G.muted};text-transform:uppercase;margin-bottom:3px">Tracked Malfunctions</div><div style="font-family:'Share Tech Mono',monospace;font-size:20px;color:${(malByFA[f.id]||0)>0?G.danger:G.dim}">${malByFA[f.id]||0}</div></div>
+                      </div>
+                      ${(mrbsByFA[f.id]!==null||l1kByFA[f.id]!==null)&&html`
+                        <div style="margin:11px 0;padding:11px 13px;background:${G.surface};border:1px solid ${G.danger}33;border-left:3px solid ${G.danger};border-radius:1px">
+                          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+                            ${mrbsByFA[f.id]!==null&&html`
+                              <div style="flex:1">
+                                <div style="font-size:9px;letter-spacing:2px;color:${G.muted};text-transform:uppercase;margin-bottom:2px">Mean Rounds Between Stoppages</div>
+                                <div style="font-size:10px;color:${G.dim};font-style:italic;margin-bottom:4px">${malByFA[f.id]} mal over ${tot.toLocaleString()} rds</div>
+                                <div style="font-family:'Share Tech Mono',monospace;font-size:24px;color:${mrbsByFA[f.id]>=1000?G.green:mrbsByFA[f.id]>=500?G.accent:G.danger};line-height:1">
+                                  ${mrbsByFA[f.id].toLocaleString()}<span style="font-size:10px;color:${G.dim};margin-left:4px">rds/stop</span>
+                                </div>
+                              </div>`}
+                            ${mrbsByFA[f.id]!==null&&l1kByFA[f.id]!==null&&html`<div style="width:1px;align-self:stretch;background:${G.border};flex-shrink:0"></div>`}
+                            ${l1kByFA[f.id]!==null&&html`
+                              <div style="flex:1;text-align:${mrbsByFA[f.id]!==null?'right':'left'}">
+                                <div style="font-size:9px;letter-spacing:2px;color:${G.muted};text-transform:uppercase;margin-bottom:2px">Last 1,000 Rounds</div>
+                                <div style="font-size:10px;color:${G.dim};font-style:italic;margin-bottom:4px">Tracked stoppages</div>
+                                <div style="font-family:'Share Tech Mono',monospace;font-size:24px;color:${l1kByFA[f.id]===0?G.green:l1kByFA[f.id]<=2?G.accent:G.danger};line-height:1">
+                                  ${l1kByFA[f.id]}<span style="font-size:10px;color:${G.dim};margin-left:4px">stoppage${l1kByFA[f.id]!==1?'s':''}</span>
+                                </div>
+                              </div>`}
+                          </div>
+                        </div>`}
+                      ${(f.pmcsSchedule||[]).length>0&&html`
+                        <div style="margin-top:11px">
+                          <div style="font-size:10px;letter-spacing:2px;color:${G.muted};text-transform:uppercase;margin-bottom:7px">PMCS Schedule</div>
+                          ${(f.pmcsSchedule||[]).map(p=>{
+                            const al=pmcsAlerts.find(a=>a.fId===f.id&&a.pId===p.id);if(!al)return null;
+                            const {isDue,pct,since,left,interval}=al;
+                            const bc=isDue?G.danger:pct>=80?G.accent:G.green;
+                            return html`
+                              <div key=${p.id} style="background:${G.bg};border:1px solid ${isDue?G.danger+'55':G.border};border-left:3px solid ${bc};border-radius:1px;padding:9px 11px;margin-bottom:7px">
+                                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:5px">
+                                  <div style="flex:1;min-width:0">
+                                    <div style="font-size:12px;color:${G.text};margin-bottom:2px">${p.task}</div>
+                                    <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.muted}">Every ${interval.toLocaleString()} rds · ${since.toLocaleString()} since service</div>
+                                  </div>
+                                  ${isDue
+                                    ?html`<button class="btn bp bsm" style="flex-shrink:0;margin-left:9px" onClick=${()=>markSvc(f.id,p.id)}>Mark Serviced</button>`
+                                    :html`<span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.muted};margin-left:9px;flex-shrink:0">${left.toLocaleString()} rds left</span>`}
+                                </div>
+                                <div class="bw"><div style="height:100%;width:${pct}%;background:${bc};border-radius:2px;transition:width 0.4s ease"></div></div>
+                                ${isDue&&html`<div style="font-family:'Oswald',sans-serif;font-size:10px;letter-spacing:2px;color:${G.danger};text-transform:uppercase;margin-top:4px">⚙ SERVICE DUE</div>`}
+                              </div>`})}
+                        </div>`}
+                      ${f.notes&&html`<div style="font-size:12px;color:${G.muted};margin-top:9px">Notes: ${f.notes}</div>`}
+                      <div style="display:flex;gap:7px;margin-top:11px">
+                        <button class="btn bg bsm" onClick=${()=>{setEditFA(f);setShowFA(true)}}>Edit</button>
+                        <button class="btn bd" onClick=${()=>delFA(f.id)}>Remove</button>
+                      </div>
+                    </div>`}
+                </div>`})}
+          </div>`}
+
+        <!-- Statistics -->
+        ${tab==='stats'&&html`
+          <div class="pg">
+            <div style="display:flex;gap:0;border-bottom:1px solid ${G.border};margin-bottom:16px">
+              ${[['overview','Overview'],['firearms','By Firearm'],['positions','By Position']].map(([k,l])=>html`
+                <button key=${k} onClick=${()=>setStatSub(k)} style="font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;padding:9px 0;border:none;background:none;cursor:pointer;color:${statSub===k?G.accent:G.muted};border-bottom:2px solid ${statSub===k?G.accent:'transparent'};margin-bottom:-1px;flex:1;transition:color 0.15s">
+                  ${l}
+                </button>`)}
+            </div>
+
+            ${statSub==='overview'&&html`
+              <>
+                <div class="st">OVERVIEW</div>
+                <div class="sgrid">
+                  <div class="scard"><div class="scn">${lifeRds.toLocaleString()}</div><div class="scl">Lifetime Rds</div></div>
+                  <div class="scard"><div class="scn">${yrRds.toLocaleString()}</div><div class="scl">Rds ${yr()}</div></div>
+                  <div class="scard"><div class="scn">${sessions.length}</div><div class="scl">Total Sessions</div></div>
+                  <div class="scard"><div class="scn">${yrSess}</div><div class="scl">Sessions ${yr()}</div></div>
+                  <div class="scard"><div class="scn">${firearms.length}</div><div class="scl">Firearms</div></div>
+                  <div class="scard"><div class="scn">${yrSess>0?Math.round(yrRds/yrSess):0}</div><div class="scl">Avg Rds/Sess</div></div>
+                </div>
+                <div class="st">RECENT SESSIONS</div>
+                <div class="card"><div class="cb" style="padding:0">
+                  ${sorted.slice(0,8).map((s,i)=>{
+                    const rds=s.gunEntries.reduce((a,g)=>a+(parseInt(g.rounds)||0),0);
+                    return html`<div key=${s.id} style="display:flex;align-items:center;padding:9px 13px;border-bottom:${i<7?'1px solid '+G.border:'none'}">
+                      <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:${G.accent};width:83px">${fmtDate(s.date)}</span>
+                      <span style="flex:1;font-size:12px;color:${G.muted};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.location||'—'}</span>
+                      <span style="font-family:'Share Tech Mono',monospace;font-size:11px;color:${G.text}">${rds} rds</span>
+                    </div>`})}
+                  ${sessions.length===0&&html`<div class="empty" style="padding:18px">NO SESSIONS YET</div>`}
+                </div></div>
+              </>`}
+
+            ${statSub==='firearms'&&html`
+              <>
+                <div class="st">ROUND COUNT BY FIREARM</div>
+                <div class="card"><div class="cb">
+                  ${firearms.length===0&&html`<div class="empty" style="padding:18px">NO FIREARMS</div>`}
+                  ${firearms.map(f=>{
+                    const tot=rdsByFA[f.id]||0,pct=Math.round((tot/maxRds)*100);
+                    return html`
+                      <div key=${f.id} class="frow">
+                        <div>
+                          <div style="font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1px">${f.make} ${f.model}</div>
+                          <div style="font-size:10px;color:${G.muted};font-family:'Share Tech Mono',monospace">${f.caliber}</div>
+                          <div class="bw"><div class="bf" style="width:${pct}%"></div></div>
+                        </div>
+                        <div style="text-align:right"><div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:${G.accent}">${tot.toLocaleString()}</div><div style="font-size:9px;color:${G.muted};letter-spacing:1px">LIFETIME</div></div>
+                        <div style="text-align:right"><div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:${G.muted}">${(rdsByFAYr[f.id]||0).toLocaleString()}</div><div style="font-size:9px;color:${G.dim};letter-spacing:1px">${yr()}</div></div>
+                        <div style="text-align:right"><div style="font-family:'Share Tech Mono',monospace;font-size:12px;color:${(malByFA[f.id]||0)>0?G.danger:G.dim}">${malByFA[f.id]||0}</div><div style="font-size:9px;color:${G.dim};letter-spacing:1px">MAL</div></div>
+                      </div>`})}
+                </div></div>
+              </>`}
+
+            ${statSub==='positions'&&html`
+              <>
+                <div class="st">ROUNDS BY FIRING POSITION</div>
+                ${lifeRds===0&&html`<div class="empty">LOG SESSIONS WITH POSITIONS TO SEE DATA</div>`}
+                ${lifeRds>0&&html`
+                  <div class="card"><div class="cb">
+                    ${[...POSITIONS.map(p=>p.v),'unspecified'].filter(pv=>rdsByPos[pv]>0).map(pv=>{
+                      const label=POSITIONS.find(p=>p.v===pv)?.l||'Unspecified';
+                      const rds=rdsByPos[pv]||0,ses=sessByPos[pv]||0;
+                      const pct=Math.round((rds/maxPosRds)*100),share=Math.round((rds/lifeRds)*100);
+                      return html`
+                        <div key=${pv} style="padding:11px 0;border-bottom:1px solid ${G.border}">
+                          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+                            <div>
+                              <span style="font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1px;color:${G.text}">${label}</span>
+                              <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.dim};margin-left:7px">${ses} session${ses!==1?'s':''}</span>
+                            </div>
+                            <div>
+                              <span style="font-family:'Share Tech Mono',monospace;font-size:13px;color:${G.accent}">${rds.toLocaleString()}</span>
+                              <span style="font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.dim};margin-left:5px">${share}%</span>
+                            </div>
+                          </div>
+                          <div class="bw"><div class="bf" style="width:${pct}%"></div></div>
+                        </div>`})}
+                    ${Object.keys(rdsByPos).filter(p=>rdsByPos[p]>0).length===0&&html`<div class="empty" style="padding:18px">NO POSITION DATA</div>`}
+                  </div></div>`}
+                ${lifeRds>0&&Object.keys(rdsByPos).some(p=>rdsByPos[p]>0)&&html`
+                  <>
+                    <div class="st" style="margin-top:16px">POSITION SUMMARY</div>
+                    <div class="sgrid">
+                      ${[...POSITIONS.map(p=>p.v),'unspecified'].filter(pv=>rdsByPos[pv]>0).slice(0,6).map(pv=>{
+                        const label=POSITIONS.find(p=>p.v===pv)?.l||'Unspecified';
+                        const rds=rdsByPos[pv]||0,share=Math.round((rds/lifeRds)*100);
+                        return html`<div key=${pv} class="scard"><div class="scn">${rds.toLocaleString()}</div><div class="scl" style="margin-bottom:3px">${label}</div><div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:${G.dim}">${share}% of total</div></div>`})}
+                    </div>
+                  </>`}
+              </>`}
+          </div>`}
+
+      </div>
+
+      <!-- Modals -->
+      ${showSess&&html`<${SessionModal} firearms=${firearms} existing=${editSess} onSave=${saveSess} onClose=${()=>{setShowSess(false);setEditSess(null)}}/>`}
+      ${showFA&&html`<${FirearmModal} existing=${editFA} onSave=${saveFA} onClose=${()=>{setShowFA(false);setEditFA(null)}}/>`}
+    </>`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
