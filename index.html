@@ -80,6 +80,9 @@ const MAL_CAUSES = [
 const WEATHER = ['Clear','Overcast','Rain','Wind','Cold','Hot','Indoor'];
 const TARGET_TYPES = ['Paper','Steel','IPSC/USPSA','IDPA','Silhouette','3-Gun','Other'];
 const FA_TYPES = ['Pistol','Revolver','Rifle','Shotgun','PCC','Suppressed'];
+const SUPP_MOUNTS = ['Direct Thread','Quick Detach (QD)','Piston','Over Barrel','Integral','Other'];
+const BAFFLE_MATS = ['Stainless Steel','Inconel','Titanium','Aluminum','Carbon Steel','Monocore','Other'];
+const DEFAULT_SUPP = [];
 const DEFAULT_FA = [
   {id:'fa1',make:'Glock',model:'19',caliber:'9mm',serial:'',type:'Pistol',notes:'Gen 5',pmcsSchedule:[]},
   {id:'fa2',make:'Colt',model:'1911',caliber:'.45 ACP',serial:'',type:'Pistol',notes:'',pmcsSchedule:[]},
@@ -100,7 +103,7 @@ const fr = {display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:9};
 const barWrap = {height:4,background:G.border,borderRadius:2,marginTop:5,overflow:'hidden'};
 
 // ── GunEntryForm ───────────────────────────────────────────────────────────────
-function GunEntryForm({firearms, entry, onChange, onRemove}) {
+function GunEntryForm({firearms, suppressors, entry, onChange, onRemove}) {
   const fa = firearms.find(f => f.id === entry.firearmsId);
   const upd = ch => onChange({...entry, ...ch});
   const mals = entry.malfunctionLog || [];
@@ -159,6 +162,41 @@ function GunEntryForm({firearms, entry, onChange, onRemove}) {
           <input style={inp} type="text" placeholder='e.g. 1.5" group' value={entry.score} onChange={e => upd({score:e.target.value})}/>
         </div>
       </div>
+
+      {suppressors && suppressors.length > 0 && (
+        <div>
+          <div style={{...fc, marginBottom: entry.suppressorId ? 8 : 10}}>
+            <label style={lbl}>Suppressor Used (optional)</label>
+            <select style={sel} value={entry.suppressorId||''} onChange={e => upd({suppressorId:e.target.value||null, suppressedRounds: e.target.value ? (entry.rounds||0) : 0})}>
+              <option value="">— Unsuppressed —</option>
+              {suppressors.map(s => <option key={s.id} value={s.id}>{s.make} {s.model} ({s.caliber})</option>)}
+            </select>
+          </div>
+          {entry.suppressorId && (
+            <div style={{background:`${G.green}10`, border:`1px solid ${G.green}33`, borderRadius:1, padding:'10px 12px', marginBottom:10}}>
+              <label style={{...lbl, color:G.green, marginBottom:8}}>Suppressed Round Count</label>
+              <div style={{display:'flex', alignItems:'center', gap:12}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11, color:G.muted, marginBottom:6}}>How many of the {entry.rounds||0} rounds fired were suppressed?</div>
+                  <input style={{...inp, fontSize:16}} type="number" min="0" max={entry.rounds||0}
+                    value={entry.suppressedRounds??entry.rounds??0}
+                    onChange={e => upd({suppressedRounds: Math.min(parseInt(e.target.value)||0, entry.rounds||0)})}/>
+                </div>
+                <div style={{textAlign:'center', flexShrink:0}}>
+                  <div style={{fontFamily:"'Share Tech Mono',monospace", fontSize:20, color:G.green, lineHeight:1}}>
+                    {Math.round(entry.rounds > 0 ? ((entry.suppressedRounds??entry.rounds??0)/entry.rounds)*100 : 0)}%
+                  </div>
+                  <div style={{fontSize:9, color:G.muted, letterSpacing:1, textTransform:'uppercase', marginTop:3}}>suppressed</div>
+                </div>
+              </div>
+              <div style={{display:'flex', gap:8, marginTop:8}}>
+                <button style={{...btnG, ...btnSm, fontSize:11, flex:1}} onClick={() => upd({suppressedRounds:entry.rounds||0})}>All suppressed</button>
+                <button style={{...btnG, ...btnSm, fontSize:11, flex:1}} onClick={() => upd({suppressedRounds:0})}>None suppressed</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={fc}>
         <label style={lbl}>Performance Notes</label>
@@ -220,7 +258,7 @@ function GunEntryForm({firearms, entry, onChange, onRemove}) {
 }
 
 // ── SessionModal ───────────────────────────────────────────────────────────────
-function SessionModal({firearms, existing, onSave, onClose}) {
+function SessionModal({firearms, suppressors, existing, onSave, onClose}) {
   const [date, setDate] = useState(existing?.date || todayStr());
   const [loc, setLoc] = useState(existing?.location || '');
   const [wx, setWx] = useState(existing?.weather || []);
@@ -264,7 +302,7 @@ function SessionModal({firearms, existing, onSave, onClose}) {
         </div>
 
         {guns.map((e,i) => (
-          <GunEntryForm key={e.id} firearms={firearms} entry={e}
+          <GunEntryForm key={e.id} firearms={firearms} suppressors={suppressors} entry={e}
             onChange={u => setGuns(guns.map((g,gi)=>gi===i?u:g))}
             onRemove={() => setGuns(guns.filter((_,gi)=>gi!==i))}/>
         ))}
@@ -359,26 +397,128 @@ function FirearmModal({existing, onSave, onClose}) {
   );
 }
 
+// ── SuppressorModal ────────────────────────────────────────────────────────────
+function SuppressorModal({existing, onSave, onClose}) {
+  const [make, setMake] = useState(existing?.make || '');
+  const [model, setModel] = useState(existing?.model || '');
+  const [cal, setCal] = useState(existing?.caliber || '');
+  const [mount, setMount] = useState(existing?.mount || '');
+  const [baffle, setBaffle] = useState(existing?.baffle || '');
+  const [ser, setSer] = useState(existing?.serial || '');
+  const [nfa, setNfa] = useState(existing?.nfaNum || '');
+  const [mfgDate, setMfgDate] = useState(existing?.mfgDate || '');
+  const [notes, setNotes] = useState(existing?.notes || '');
+  const [pmcs, setPmcs] = useState(existing?.pmcsSchedule || []);
+
+  const addP = () => setPmcs([...pmcs,{id:uid(),interval:500,task:'',lastServicedAt:0}]);
+  const updP = (i,ch) => setPmcs(pmcs.map((p,pi)=>pi===i?{...p,...ch}:p));
+  const remP = i => setPmcs(pmcs.filter((_,pi)=>pi!==i));
+  const save = () => {
+    if(!make||!model) return;
+    onSave({id:existing?.id||uid(),make,model,caliber:cal,mount,baffle,serial:ser,nfaNum:nfa,mfgDate,notes,pmcsSchedule:pmcs});
+    onClose();
+  };
+
+  const modalStyle = {
+    background:G.surface, borderTop:`2px solid ${G.green}`, border:`1px solid ${G.border}`,
+    width:'100%', maxWidth:640, maxHeight:'92dvh', overflowY:'auto',
+    borderRadius:'8px 8px 0 0', padding:'18px 15px 30px'
+  };
+
+  return (
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div style={modalStyle}>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,letterSpacing:3,textTransform:'uppercase',color:G.green,marginBottom:16,paddingBottom:10,borderBottom:`1px solid ${G.border}`}}>
+          {existing ? 'Edit Suppressor' : 'Register Suppressor'}
+        </div>
+
+        <div style={fr}>
+          <div style={fc}><label style={lbl}>Make *</label><input style={inp} value={make} onChange={e=>setMake(e.target.value)} placeholder="SilencerCo, OSS, Dead Air..."/></div>
+          <div style={fc}><label style={lbl}>Model *</label><input style={inp} value={model} onChange={e=>setModel(e.target.value)} placeholder="Omega 300, Sandman-S..."/></div>
+        </div>
+        <div style={fr}>
+          <div style={fc}><label style={lbl}>Caliber / Rated For</label><input style={inp} value={cal} onChange={e=>setCal(e.target.value)} placeholder="e.g. .30 cal, 9mm, 5.56..."/></div>
+          <div style={fc}><label style={lbl}>Mount Type</label>
+            <select style={sel} value={mount} onChange={e=>setMount(e.target.value)}>
+              <option value="">—</option>
+              {SUPP_MOUNTS.map(m=><option key={m}>{m}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={fr}>
+          <div style={fc}><label style={lbl}>Baffle Material</label>
+            <select style={sel} value={baffle} onChange={e=>setBaffle(e.target.value)}>
+              <option value="">—</option>
+              {BAFFLE_MATS.map(b=><option key={b}>{b}</option>)}
+            </select>
+          </div>
+          <div style={fc}><label style={lbl}>Mfg / Approval Date</label><input style={inp} type="date" value={mfgDate} onChange={e=>setMfgDate(e.target.value)}/></div>
+        </div>
+        <div style={fr}>
+          <div style={fc}><label style={lbl}>Serial #</label><input style={inp} value={ser} onChange={e=>setSer(e.target.value)} placeholder="Suppressor serial number"/></div>
+          <div style={fc}><label style={lbl}>NFA Form 4 # (optional)</label><input style={inp} value={nfa} onChange={e=>setNfa(e.target.value)} placeholder="Tax stamp / Form 4 #"/></div>
+        </div>
+        <div style={fc}><label style={lbl}>Notes</label><input style={inp} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Host firearms, mounts owned, observations..."/></div>
+
+        <div style={{borderTop:`1px solid ${G.border}`,paddingTop:13,marginTop:4}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:9}}>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:3,textTransform:'uppercase',color:G.muted}}>PMCS / Service Schedule</div>
+            <button style={{...btnG,...btnSm}} onClick={addP}>+ Add</button>
+          </div>
+          {pmcs.length===0 && <div style={{fontSize:12,color:G.dim,fontStyle:'italic',marginBottom:7}}>No service intervals set. Add one for baffle cleaning, end cap inspection, etc.</div>}
+          {pmcs.map((p,i) => (
+            <div key={p.id} style={{background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,padding:9,marginBottom:7}}>
+              <div style={{display:'flex',gap:7,alignItems:'flex-end'}}>
+                <div style={{...fc,width:115,flexShrink:0,marginBottom:0}}>
+                  <label style={lbl}>Every (rds)</label>
+                  <input style={inp} type="number" min="1" value={p.interval} onChange={e=>updP(i,{interval:parseInt(e.target.value)||0})} placeholder="500"/>
+                </div>
+                <div style={{...fc,flex:1,marginBottom:0}}>
+                  <label style={lbl}>Service Task</label>
+                  <input style={inp} type="text" value={p.task} onChange={e=>updP(i,{task:e.target.value})} placeholder="Baffle cleaning, end cap check, lube..."/>
+                </div>
+                <button style={{...btnD,padding:'10px 9px',flexShrink:0}} onClick={()=>remP(i)}>✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{display:'flex',gap:9,justifyContent:'flex-end',marginTop:16,paddingTop:13,borderTop:`1px solid ${G.border}`}}>
+          <button style={btnG} onClick={onClose}>Cancel</button>
+          <button style={{...btnP, background:G.green}} onClick={save}>Save Suppressor</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────────
 function App() {
   const [tab, setTab] = useState('stats');
   const [firearms, setFA] = useState([]);
+  const [suppressors, setSupp] = useState([]);
   const [sessions, setSE] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [showSess, setShowSess] = useState(false);
   const [editSess, setEditSess] = useState(null);
   const [showFA, setShowFA] = useState(false);
   const [editFA, setEditFA] = useState(null);
+  const [showSupp, setShowSupp] = useState(false);
+  const [editSupp, setEditSupp] = useState(null);
   const [openSess, setOpenSess] = useState(null);
   const [openFA, setOpenFA] = useState(null);
+  const [openSupp, setOpenSupp] = useState(null);
+  const [armsSub, setArmsSub] = useState('firearms'); // 'firearms' | 'suppressors'
   const [statSub, setStatSub] = useState('overview');
 
   useEffect(() => {
     setFA(S.get('firearms') ?? DEFAULT_FA);
+    setSupp(S.get('suppressors') ?? DEFAULT_SUPP);
     setSE(S.get('sessions') ?? []);
     setLoaded(true);
   }, []);
   useEffect(() => { if(loaded) S.set('firearms',firearms); }, [firearms,loaded]);
+  useEffect(() => { if(loaded) S.set('suppressors',suppressors); }, [suppressors,loaded]);
   useEffect(() => { if(loaded) S.set('sessions',sessions); }, [sessions,loaded]);
 
   // ── Computed ──
@@ -388,6 +528,22 @@ function App() {
 
   const rdsByFA = useMemo(() => { const m={}; sessions.forEach(se=>se.gunEntries.forEach(g=>{ if(!g.firearmsId)return; m[g.firearmsId]=(m[g.firearmsId]||0)+(parseInt(g.rounds)||0); })); return m; }, [sessions]);
   const rdsByFAYr = useMemo(() => { const y=String(curYear()),m={}; sessions.filter(s=>s.date?.startsWith(y)).forEach(se=>se.gunEntries.forEach(g=>{ if(!g.firearmsId)return; m[g.firearmsId]=(m[g.firearmsId]||0)+(parseInt(g.rounds)||0); })); return m; }, [sessions]);
+  const suppRdsByFA = useMemo(() => {
+    const m={};
+    sessions.forEach(se=>se.gunEntries.forEach(g=>{
+      if(!g.firearmsId||!g.suppressorId) return;
+      m[g.firearmsId]=(m[g.firearmsId]||0)+(parseInt(g.suppressedRounds??g.rounds)||0);
+    }));
+    return m;
+  }, [sessions]);
+  const suppRdsByFAYr = useMemo(() => {
+    const y=String(curYear()), m={};
+    sessions.filter(s=>s.date?.startsWith(y)).forEach(se=>se.gunEntries.forEach(g=>{
+      if(!g.firearmsId||!g.suppressorId) return;
+      m[g.firearmsId]=(m[g.firearmsId]||0)+(parseInt(g.suppressedRounds??g.rounds)||0);
+    }));
+    return m;
+  }, [sessions]);
   const maxRds = useMemo(() => Math.max(1,...Object.values(rdsByFA)), [rdsByFA]);
 
   const malByFA = useMemo(() => { const m={}; sessions.forEach(se=>se.gunEntries.forEach(g=>{ if(!g.firearmsId)return; const t=(g.malfunctionLog||[]).filter(mal=>mal.tracked!==false).length+(g.malfunctions||0); m[g.firearmsId]=(m[g.firearmsId]||0)+t; })); return m; }, [sessions]);
@@ -422,13 +578,143 @@ function App() {
   }, [firearms,rdsByFA]);
   const dueAlerts = useMemo(() => pmcsAlerts.filter(a=>a.isDue), [pmcsAlerts]);
 
+  // ── Suppressor computed ──
+  const rdsBySupp = useMemo(() => {
+    const m={};
+    sessions.forEach(se=>se.gunEntries.forEach(g=>{
+      if(!g.suppressorId) return;
+      m[g.suppressorId]=(m[g.suppressorId]||0)+(parseInt(g.suppressedRounds??g.rounds)||0);
+    }));
+    return m;
+  }, [sessions]);
+
+  const rdsBySuppYr = useMemo(() => {
+    const y=String(curYear()), m={};
+    sessions.filter(s=>s.date?.startsWith(y)).forEach(se=>se.gunEntries.forEach(g=>{
+      if(!g.suppressorId) return;
+      m[g.suppressorId]=(m[g.suppressorId]||0)+(parseInt(g.suppressedRounds??g.rounds)||0);
+    }));
+    return m;
+  }, [sessions]);
+
+  const suppPmcsAlerts = useMemo(() => {
+    const a=[];
+    suppressors.forEach(s=>(s.pmcsSchedule||[]).forEach(p=>{
+      if(!p.interval||!p.task) return;
+      const tot=rdsBySupp[s.id]||0, since=tot-(p.lastServicedAt||0), isDue=since>=p.interval, pct=Math.min(100,Math.round((since/p.interval)*100));
+      a.push({sId:s.id,pId:p.id,s,task:p.task,interval:p.interval,since,isDue,left:p.interval-since,pct});
+    }));
+    return a;
+  }, [suppressors,rdsBySupp]);
+  const suppDueAlerts = useMemo(() => suppPmcsAlerts.filter(a=>a.isDue), [suppPmcsAlerts]);
+
+  const allDueAlerts = useMemo(() => dueAlerts.length + suppDueAlerts.length, [dueAlerts,suppDueAlerts]);
+
+  // ── Suppressed round counts ──
+  const suppRdsLife = useMemo(() =>
+    sessions.reduce((s,se) => s + se.gunEntries.reduce((a,g) => {
+      if(!g.suppressorId) return a;
+      return a + (parseInt(g.suppressedRounds??g.rounds)??0);
+    }, 0), 0)
+  , [sessions]);
+  const suppRdsYr = useMemo(() => {
+    const y=String(curYear());
+    return sessions.filter(s=>s.date?.startsWith(y)).reduce((s,se) => s + se.gunEntries.reduce((a,g) => {
+      if(!g.suppressorId) return a;
+      return a + (parseInt(g.suppressedRounds??g.rounds)??0);
+    }, 0), 0);
+  }, [sessions]);
+
   // ── Handlers ──
   const saveSess = s => setSE(prev => { const i=prev.findIndex(x=>x.id===s.id); if(i>=0){const n=[...prev];n[i]=s;return n;} return[s,...prev]; });
   const delSess = id => setSE(prev => prev.filter(s=>s.id!==id));
   const saveFA = f => setFA(prev => { const i=prev.findIndex(x=>x.id===f.id); if(i>=0){const n=[...prev];n[i]=f;return n;} return[...prev,f]; });
   const delFA = id => setFA(prev => prev.filter(f=>f.id!==id));
   const markSvc = (fId,pId) => setFA(prev => prev.map(f => f.id!==fId?f:{...f,pmcsSchedule:(f.pmcsSchedule||[]).map(p=>p.id!==pId?p:{...p,lastServicedAt:rdsByFA[fId]||0})}));
+  const saveSupp = s => setSupp(prev => { const i=prev.findIndex(x=>x.id===s.id); if(i>=0){const n=[...prev];n[i]=s;return n;} return[...prev,s]; });
+  const delSupp = id => setSupp(prev => prev.filter(s=>s.id!==id));
+  const markSuppSvc = (sId,pId) => setSupp(prev => prev.map(s => s.id!==sId?s:{...s,pmcsSchedule:(s.pmcsSchedule||[]).map(p=>p.id!==pId?p:{...p,lastServicedAt:rdsBySupp[sId]||0})}));
   const sorted = useMemo(() => [...sessions].sort((a,b)=>b.date?.localeCompare(a.date)), [sessions]);
+
+  // ── Export / Import ──
+  const exportJSON = () => {
+    const data = { exportedAt: new Date().toISOString(), version: 2, firearms, suppressors, sessions };
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shooters-logbook-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportCSV = () => {
+    const rows = [['Date','Location','Firearm','Caliber','Rounds','Suppressor','Suppressed Rounds','Ammo','Distance (yds)','Position','Target','Score','Malfunctions (tracked)','Notes']];
+    sorted.forEach(se => {
+      se.gunEntries.forEach(g => {
+        const fa = firearms.find(f=>f.id===g.firearmsId);
+        const sp = suppressors.find(s=>s.id===g.suppressorId);
+        const trackedMal = (g.malfunctionLog||[]).filter(m=>m.tracked!==false).length + (g.malfunctions||0);
+        rows.push([
+          se.date, se.location||'',
+          fa ? `${fa.make} ${fa.model}` : '',
+          fa ? fa.caliber : '',
+          g.rounds||0,
+          sp ? `${sp.make} ${sp.model}` : '',
+          g.suppressorId ? (g.suppressedRounds??g.rounds??0) : '',
+          g.ammoLoad||'', g.distance||'',
+          POSITIONS.find(p=>p.v===g.position)?.l||g.position||'',
+          g.targetType||'', g.score||'',
+          trackedMal,
+          (g.notes||'').replace(/"/g,"'")
+        ]);
+      });
+    });
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shooters-logbook-sessions-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportSuppressorsCSV = () => {
+    const rows = [['Make','Model','Caliber','Mount','Baffle','Serial','NFA #','Approval Date','Lifetime Rounds','Notes']];
+    suppressors.forEach(s => {
+      rows.push([s.make,s.model,s.caliber||'',s.mount||'',s.baffle||'',s.serial||'',s.nfaNum||'',s.mfgDate||'',(rdsBySupp[s.id]||0).toString(),s.notes||'']);
+    });
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shooters-logbook-suppressors-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const [importMsg, setImportMsg] = useState(null);
+  const handleImport = e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if(!data.firearms || !data.sessions) { setImportMsg({ok:false,text:'Invalid file — missing firearms or sessions data.'}); return; }
+        if(window.confirm(`Import ${data.firearms?.length||0} firearms, ${data.suppressors?.length||0} suppressors, and ${data.sessions?.length||0} sessions?\n\nThis will REPLACE all current data.`)) {
+          setFA(data.firearms || []);
+          setSupp(data.suppressors || []);
+          setSE(data.sessions || []);
+          setImportMsg({ok:true,text:`Imported ${data.firearms?.length||0} firearms, ${data.suppressors?.length||0} suppressors, ${data.sessions?.length||0} sessions.`});
+        }
+      } catch { setImportMsg({ok:false,text:'Could not parse file. Make sure it is a valid logbook JSON export.'}); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   // ── Shared layout styles ──
   const hdrStyle = {background:G.surface,borderBottom:`2px solid ${G.accent}`,padding:'14px 18px 12px',display:'flex',alignItems:'flex-end',gap:14,position:'sticky',top:0,zIndex:100};
@@ -468,24 +754,34 @@ function App() {
         {[['stats','Stats'],['log','Log'],['firearms','Arms']].map(([k,l]) => (
           <button key={k} onClick={()=>setTab(k)} style={{padding:'11px 0',fontFamily:"'Oswald',sans-serif",fontSize:12,letterSpacing:2,textTransform:'uppercase',color:tab===k?G.accent:G.muted,cursor:'pointer',border:'none',background:'none',borderBottom:`2px solid ${tab===k?G.accent:'transparent'}`,marginBottom:-1,flex:1,transition:'color 0.15s'}}>
             {l}
-            {k==='firearms' && dueAlerts.length>0 && (
-              <span style={{display:'inline-block',marginLeft:5,background:G.accent,color:G.bg,fontFamily:"'Share Tech Mono',monospace",fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8,lineHeight:'16px',verticalAlign:'middle'}}>{dueAlerts.length}</span>
+            {k==='firearms' && allDueAlerts>0 && (
+              <span style={{display:'inline-block',marginLeft:5,background:G.accent,color:G.bg,fontFamily:"'Share Tech Mono',monospace",fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8,lineHeight:'16px',verticalAlign:'middle'}}>{allDueAlerts}</span>
             )}
           </button>
         ))}
       </div>
 
       {/* ── PMCS Alert Banner ── */}
-      {dueAlerts.length > 0 && (
+      {(dueAlerts.length > 0 || suppDueAlerts.length > 0) && (
         <div style={{background:`${G.accent}12`,borderBottom:`2px solid ${G.accent}`,padding:'10px 15px'}}>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',marginBottom:6}}>⚙ {dueAlerts.length} PMCS Item{dueAlerts.length!==1?'s':''} Due</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',marginBottom:6}}>⚙ {allDueAlerts} PMCS Item{allDueAlerts!==1?'s':''} Due</div>
           {dueAlerts.map((a,i) => (
-            <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:i<dueAlerts.length-1?5:0}}>
+            <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:5}}>
               <div style={{flex:1,minWidth:0,overflow:'hidden'}}>
                 <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,color:G.text}}>{a.f.make} {a.f.model}</span>
                 <span style={{fontSize:12,color:G.muted,marginLeft:5}}>— {a.task}</span>
               </div>
-              <button style={{...btnG,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>{markSvc(a.fId,a.pId);setTab('firearms');}}>Done</button>
+              <button style={{...btnG,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>{markSvc(a.fId,a.pId);setTab('firearms');setArmsSub('firearms');}}>Done</button>
+            </div>
+          ))}
+          {suppDueAlerts.map((a,i) => (
+            <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:i<suppDueAlerts.length-1?5:0}}>
+              <div style={{flex:1,minWidth:0,overflow:'hidden'}}>
+                <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,color:G.green}}>{a.s.make} {a.s.model}</span>
+                <span style={{fontSize:10,color:G.green,marginLeft:5,fontFamily:"'Share Tech Mono',monospace"}}>SUPP</span>
+                <span style={{fontSize:12,color:G.muted,marginLeft:5}}>— {a.task}</span>
+              </div>
+              <button style={{...btnG,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>{markSuppSvc(a.sId,a.pId);setTab('firearms');setArmsSub('suppressors');}}>Done</button>
             </div>
           ))}
         </div>
@@ -535,6 +831,7 @@ function App() {
                           </div>
                           {g.ammoLoad && <div style={{fontSize:12,color:G.muted,marginBottom:3}}>Ammo: {g.ammoLoad}</div>}
                           {g.distance && <div style={{fontSize:12,color:G.muted,marginBottom:3}}>Distance: {g.distance} yds</div>}
+                          {g.suppressorId && (()=>{ const sp=suppressors.find(s=>s.id===g.suppressorId); return sp?<div style={{fontSize:12,color:G.green,marginBottom:3}}>🔇 Suppressor: {sp.make} {sp.model}{g.suppressedRounds!=null && g.suppressedRounds!==g.rounds ? ` · ${g.suppressedRounds} rds suppressed` : ' · all rounds suppressed'}</div>:null; })()}
                           {g.position && <div style={{fontSize:12,color:G.muted,marginBottom:3}}>Position: {POSITIONS.find(p=>p.v===g.position)?.l||g.position}</div>}
                           {g.targetType && <div style={{fontSize:12,color:G.muted,marginBottom:3}}>Target: {g.targetType}</div>}
                           {g.score && <div style={{fontSize:12,color:G.accent,marginBottom:3}}>Score/Group: {g.score}</div>}
@@ -580,101 +877,243 @@ function App() {
       {/* ════ FIREARMS ════ */}
       {tab==='firearms' && (
         <div style={pgStyle}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13}}>
-            <div style={stStyle}>REGISTERED FIREARMS</div>
-            <button style={btnP} onClick={()=>{setEditFA(null);setShowFA(true);}}>+ Add</button>
+          {/* Arms sub-tabs */}
+          <div style={{display:'flex',borderBottom:`1px solid ${G.border}`,marginBottom:14}}>
+            {[['firearms','Firearms'],['suppressors','Suppressors']].map(([k,l]) => (
+              <button key={k} onClick={()=>setArmsSub(k)} style={{fontFamily:"'Oswald',sans-serif",fontSize:12,letterSpacing:2,textTransform:'uppercase',padding:'10px 0',border:'none',background:'none',cursor:'pointer',color:armsSub===k?(k==='suppressors'?G.green:G.accent):G.muted,borderBottom:`2px solid ${armsSub===k?(k==='suppressors'?G.green:G.accent):'transparent'}`,marginBottom:-1,flex:1,transition:'color 0.15s'}}>
+                {l}
+                {k==='suppressors' && suppDueAlerts.length>0 && <span style={{display:'inline-block',marginLeft:5,background:G.green,color:G.bg,fontFamily:"'Share Tech Mono',monospace",fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8,lineHeight:'16px',verticalAlign:'middle'}}>{suppDueAlerts.length}</span>}
+                {k==='firearms' && dueAlerts.length>0 && <span style={{display:'inline-block',marginLeft:5,background:G.accent,color:G.bg,fontFamily:"'Share Tech Mono',monospace",fontSize:9,fontWeight:700,padding:'1px 5px',borderRadius:8,lineHeight:'16px',verticalAlign:'middle'}}>{dueAlerts.length}</span>}
+              </button>
+            ))}
           </div>
-          {firearms.length===0 && <div style={{textAlign:'center',padding:'34px 18px',color:G.dim,fontFamily:"'Share Tech Mono',monospace",fontSize:11,letterSpacing:2}}>NO FIREARMS REGISTERED</div>}
-          {firearms.map(f => {
-            const tot=rdsByFA[f.id]||0, yrR=rdsByFAYr[f.id]||0, isOpen=openFA===f.id;
-            const hasDue=(f.pmcsSchedule||[]).some(p=>pmcsAlerts.find(a=>a.fId===f.id&&a.pId===p.id&&a.isDue));
-            return (
-              <div key={f.id} style={{...cardStyle, ...(hasDue?{borderColor:`${G.accent}55`}:{})}}>
-                <div style={chStyle} onClick={()=>setOpenFA(isOpen?null:f.id)}>
-                  <span style={{color:G.dim,fontSize:11}}>{isOpen?'▾':'▸'}</span>
-                  <div style={{flex:1}}>
-                    <div style={{display:'flex',alignItems:'center',gap:7}}>
-                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:600,letterSpacing:1,color:G.text,flex:1}}>{f.make} {f.model}</div>
-                      {hasDue && <span style={{fontSize:9,letterSpacing:1,color:G.accent,background:`${G.accent}20`,border:`1px solid ${G.accent}44`,padding:'2px 5px',borderRadius:2,textTransform:'uppercase',fontFamily:"'Oswald',sans-serif"}}>PMCS DUE</span>}
-                    </div>
-                    <div style={{fontSize:10,color:G.dim,marginTop:2,fontFamily:"'Share Tech Mono',monospace"}}>{f.type||'—'}{f.serial?` · SN: ${f.serial}`:''}</div>
-                  </div>
-                  <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:G.accent,background:`${G.accent}18`,padding:'3px 7px',border:`1px solid ${G.accent}33`,borderRadius:1,marginRight:4}}>{f.caliber}</span>
-                  <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:G.muted}}>{tot.toLocaleString()} rds</span>
-                </div>
-                {isOpen && (
-                  <div style={cbStyle}>
-                    <div style={fr}>
-                      <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Rounds This Year</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:G.accent}}>{yrR.toLocaleString()}</div></div>
-                      <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Lifetime Rounds</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:G.accent}}>{tot.toLocaleString()}</div></div>
-                      <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Tracked Malfunctions</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:(malByFA[f.id]||0)>0?G.danger:G.dim}}>{malByFA[f.id]||0}</div></div>
-                    </div>
 
-                    {/* MRBS + Last 1000 */}
-                    {(mrbsByFA[f.id]!==null || l1kByFA[f.id]!==null) && (
-                      <div style={{margin:'11px 0',padding:'11px 13px',background:G.surface,border:`1px solid ${G.danger}33`,borderLeft:`3px solid ${G.danger}`,borderRadius:1}}>
-                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
-                          {mrbsByFA[f.id]!==null && (
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:9,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:2}}>Mean Rounds Between Stoppages</div>
-                              <div style={{fontSize:10,color:G.dim,fontStyle:'italic',marginBottom:4}}>{malByFA[f.id]} mal over {tot.toLocaleString()} rds</div>
-                              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:24,color:mrbsByFA[f.id]>=1000?G.green:mrbsByFA[f.id]>=500?G.accent:G.danger,lineHeight:1}}>
-                                {mrbsByFA[f.id].toLocaleString()}<span style={{fontSize:10,color:G.dim,marginLeft:4}}>rds/stop</span>
+          {/* ── Firearms sub-tab ── */}
+          {armsSub==='firearms' && (
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13}}>
+                <div style={stStyle}>REGISTERED FIREARMS</div>
+                <button style={btnP} onClick={()=>{setEditFA(null);setShowFA(true);}}>+ Add</button>
+              </div>
+              {firearms.length===0 && <div style={{textAlign:'center',padding:'34px 18px',color:G.dim,fontFamily:"'Share Tech Mono',monospace",fontSize:11,letterSpacing:2}}>NO FIREARMS REGISTERED</div>}
+              {firearms.map(f => {
+                const tot=rdsByFA[f.id]||0, yrR=rdsByFAYr[f.id]||0, isOpen=openFA===f.id;
+                const hasDue=(f.pmcsSchedule||[]).some(p=>pmcsAlerts.find(a=>a.fId===f.id&&a.pId===p.id&&a.isDue));
+                return (
+                  <div key={f.id} style={{...cardStyle, ...(hasDue?{borderColor:`${G.accent}55`}:{})}}>
+                    <div style={chStyle} onClick={()=>setOpenFA(isOpen?null:f.id)}>
+                      <span style={{color:G.dim,fontSize:11}}>{isOpen?'▾':'▸'}</span>
+                      <div style={{flex:1}}>
+                        <div style={{display:'flex',alignItems:'center',gap:7}}>
+                          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:600,letterSpacing:1,color:G.text,flex:1}}>{f.make} {f.model}</div>
+                          {hasDue && <span style={{fontSize:9,letterSpacing:1,color:G.accent,background:`${G.accent}20`,border:`1px solid ${G.accent}44`,padding:'2px 5px',borderRadius:2,textTransform:'uppercase',fontFamily:"'Oswald',sans-serif"}}>PMCS DUE</span>}
+                        </div>
+                        <div style={{fontSize:10,color:G.dim,marginTop:2,fontFamily:"'Share Tech Mono',monospace"}}>{f.type||'—'}{f.serial?` · SN: ${f.serial}`:''}</div>
+                      </div>
+                      <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:G.accent,background:`${G.accent}18`,padding:'3px 7px',border:`1px solid ${G.accent}33`,borderRadius:1,marginRight:4}}>{f.caliber}</span>
+                      <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:G.muted}}>{tot.toLocaleString()} rds</span>
+                    </div>
+                    {isOpen && (
+                      <div style={cbStyle}>
+                        {/* Round count stats */}
+                        <div style={fr}>
+                          <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Rounds This Year</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:G.accent}}>{yrR.toLocaleString()}</div></div>
+                          <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Lifetime Rounds</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:G.accent}}>{tot.toLocaleString()}</div></div>
+                          <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Tracked Malfunctions</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:(malByFA[f.id]||0)>0?G.danger:G.dim}}>{malByFA[f.id]||0}</div></div>
+                        </div>
+
+                        {/* Suppressed breakdown — only shown if this gun has suppressed rounds */}
+                        {(suppRdsByFA[f.id]||0) > 0 && (() => {
+                          const suppLife = suppRdsByFA[f.id]||0;
+                          const unsuppLife = tot - suppLife;
+                          const suppYr = suppRdsByFAYr[f.id]||0;
+                          const unsuppYr = yrR - suppYr;
+                          const suppPct = tot > 0 ? Math.round((suppLife/tot)*100) : 0;
+                          return (
+                            <div style={{background:`${G.green}0d`, border:`1px solid ${G.green}2a`, borderLeft:`3px solid ${G.green}`, borderRadius:1, padding:'10px 12px', marginBottom:12}}>
+                              <div style={{fontSize:10,letterSpacing:2,color:G.green,textTransform:'uppercase',marginBottom:8}}>Suppressed / Unsuppressed Split</div>
+                              {/* Split bar */}
+                              <div style={{display:'flex',height:8,borderRadius:4,overflow:'hidden',marginBottom:10}}>
+                                <div style={{flex:suppLife,background:G.green,transition:'flex 0.4s ease'}}/>
+                                <div style={{flex:unsuppLife,background:G.border}}/>
                               </div>
-                            </div>
-                          )}
-                          {mrbsByFA[f.id]!==null && l1kByFA[f.id]!==null && <div style={{width:1,alignSelf:'stretch',background:G.border,flexShrink:0}}/>}
-                          {l1kByFA[f.id]!==null && (
-                            <div style={{flex:1,textAlign:mrbsByFA[f.id]!==null?'right':'left'}}>
-                              <div style={{fontSize:9,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:2}}>Last 1,000 Rounds</div>
-                              <div style={{fontSize:10,color:G.dim,fontStyle:'italic',marginBottom:4}}>Tracked stoppages</div>
-                              <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:24,color:l1kByFA[f.id]===0?G.green:l1kByFA[f.id]<=2?G.accent:G.danger,lineHeight:1}}>
-                                {l1kByFA[f.id]}<span style={{fontSize:10,color:G.dim,marginLeft:4}}>stoppage{l1kByFA[f.id]!==1?'s':''}</span>
+                              {/* Lifetime row */}
+                              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:6}}>
+                                <div>
+                                  <div style={{fontSize:9,letterSpacing:1,color:G.green,textTransform:'uppercase',marginBottom:2}}>Suppressed</div>
+                                  <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:16,color:G.green}}>{suppLife.toLocaleString()}</div>
+                                  <div style={{fontSize:9,color:G.muted}}>lifetime</div>
+                                </div>
+                                <div>
+                                  <div style={{fontSize:9,letterSpacing:1,color:G.muted,textTransform:'uppercase',marginBottom:2}}>Unsuppressed</div>
+                                  <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:16,color:G.muted}}>{unsuppLife.toLocaleString()}</div>
+                                  <div style={{fontSize:9,color:G.muted}}>lifetime</div>
+                                </div>
+                                <div style={{textAlign:'right'}}>
+                                  <div style={{fontSize:9,letterSpacing:1,color:G.dim,textTransform:'uppercase',marginBottom:2}}>Suppressed</div>
+                                  <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:16,color:G.green}}>{suppPct}%</div>
+                                  <div style={{fontSize:9,color:G.muted}}>of lifetime rds</div>
+                                </div>
                               </div>
+                              {/* This year row */}
+                              {yrR > 0 && (
+                                <div style={{borderTop:`1px solid ${G.green}22`,paddingTop:6,display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+                                  <div>
+                                    <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:14,color:G.green}}>{suppYr.toLocaleString()}</div>
+                                    <div style={{fontSize:9,color:G.muted}}>suppressed {curYear()}</div>
+                                  </div>
+                                  <div>
+                                    <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:14,color:G.muted}}>{unsuppYr.toLocaleString()}</div>
+                                    <div style={{fontSize:9,color:G.muted}}>unsuppressed {curYear()}</div>
+                                  </div>
+                                  <div style={{textAlign:'right'}}>
+                                    <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:14,color:G.green}}>{yrR>0?Math.round((suppYr/yrR)*100):0}%</div>
+                                    <div style={{fontSize:9,color:G.muted}}>suppressed {curYear()}</div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          );
+                        })()}
+                        {(mrbsByFA[f.id]!==null || l1kByFA[f.id]!==null) && (
+                          <div style={{margin:'11px 0',padding:'11px 13px',background:G.surface,border:`1px solid ${G.danger}33`,borderLeft:`3px solid ${G.danger}`,borderRadius:1}}>
+                            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+                              {mrbsByFA[f.id]!==null && (
+                                <div style={{flex:1}}>
+                                  <div style={{fontSize:9,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:2}}>Mean Rounds Between Stoppages</div>
+                                  <div style={{fontSize:10,color:G.dim,fontStyle:'italic',marginBottom:4}}>{malByFA[f.id]} mal over {tot.toLocaleString()} rds</div>
+                                  <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:24,color:mrbsByFA[f.id]>=1000?G.green:mrbsByFA[f.id]>=500?G.accent:G.danger,lineHeight:1}}>
+                                    {mrbsByFA[f.id].toLocaleString()}<span style={{fontSize:10,color:G.dim,marginLeft:4}}>rds/stop</span>
+                                  </div>
+                                </div>
+                              )}
+                              {mrbsByFA[f.id]!==null && l1kByFA[f.id]!==null && <div style={{width:1,alignSelf:'stretch',background:G.border,flexShrink:0}}/>}
+                              {l1kByFA[f.id]!==null && (
+                                <div style={{flex:1,textAlign:mrbsByFA[f.id]!==null?'right':'left'}}>
+                                  <div style={{fontSize:9,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:2}}>Last 1,000 Rounds</div>
+                                  <div style={{fontSize:10,color:G.dim,fontStyle:'italic',marginBottom:4}}>Tracked stoppages</div>
+                                  <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:24,color:l1kByFA[f.id]===0?G.green:l1kByFA[f.id]<=2?G.accent:G.danger,lineHeight:1}}>
+                                    {l1kByFA[f.id]}<span style={{fontSize:10,color:G.dim,marginLeft:4}}>stoppage{l1kByFA[f.id]!==1?'s':''}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        {(f.pmcsSchedule||[]).length>0 && (
+                          <div style={{marginTop:11}}>
+                            <div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:7}}>PMCS Schedule</div>
+                            {(f.pmcsSchedule||[]).map(p => {
+                              const al=pmcsAlerts.find(a=>a.fId===f.id&&a.pId===p.id);
+                              if(!al) return null;
+                              const {isDue,pct,since,left,interval}=al;
+                              const bc=isDue?G.danger:pct>=80?G.accent:G.green;
+                              return (
+                                <div key={p.id} style={{background:G.bg,border:`1px solid ${isDue?G.danger+'55':G.border}`,borderLeft:`3px solid ${bc}`,borderRadius:1,padding:'9px 11px',marginBottom:7}}>
+                                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:5}}>
+                                    <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:G.text,marginBottom:2}}>{p.task}</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted}}>Every {interval.toLocaleString()} rds · {since.toLocaleString()} since service</div></div>
+                                    {isDue ? <button style={{...btnP,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>markSvc(f.id,p.id)}>Mark Serviced</button> : <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,marginLeft:9,flexShrink:0}}>{left.toLocaleString()} rds left</span>}
+                                  </div>
+                                  <div style={barWrap}><div style={{height:'100%',width:`${pct}%`,background:bc,borderRadius:2,transition:'width 0.4s ease'}}/></div>
+                                  {isDue && <div style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginTop:4}}>⚙ SERVICE DUE</div>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {f.notes && <div style={{fontSize:12,color:G.muted,marginTop:9}}>Notes: {f.notes}</div>}
+                        <div style={{display:'flex',gap:7,marginTop:11}}>
+                          <button style={{...btnG,...btnSm}} onClick={()=>{setEditFA(f);setShowFA(true);}}>Edit</button>
+                          <button style={btnD} onClick={()=>delFA(f.id)}>Remove</button>
                         </div>
                       </div>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
-                    {/* PMCS */}
-                    {(f.pmcsSchedule||[]).length>0 && (
-                      <div style={{marginTop:11}}>
-                        <div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:7}}>PMCS Schedule</div>
-                        {(f.pmcsSchedule||[]).map(p => {
-                          const al=pmcsAlerts.find(a=>a.fId===f.id&&a.pId===p.id);
-                          if(!al) return null;
-                          const {isDue,pct,since,left,interval}=al;
-                          const bc=isDue?G.danger:pct>=80?G.accent:G.green;
-                          return (
-                            <div key={p.id} style={{background:G.bg,border:`1px solid ${isDue?G.danger+'55':G.border}`,borderLeft:`3px solid ${bc}`,borderRadius:1,padding:'9px 11px',marginBottom:7}}>
-                              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:5}}>
-                                <div style={{flex:1,minWidth:0}}>
-                                  <div style={{fontSize:12,color:G.text,marginBottom:2}}>{p.task}</div>
-                                  <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted}}>Every {interval.toLocaleString()} rds · {since.toLocaleString()} since service</div>
+          {/* ── Suppressors sub-tab ── */}
+          {armsSub==='suppressors' && (
+            <div>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13}}>
+                <div style={{...stStyle,borderBottomColor:G.green+'44',color:G.green}}>SUPPRESSORS / NFA ITEMS</div>
+                <button style={{...btnP,background:G.green}} onClick={()=>{setEditSupp(null);setShowSupp(true);}}>+ Add</button>
+              </div>
+              {suppressors.length===0 && <div style={{textAlign:'center',padding:'34px 18px',color:G.dim,fontFamily:"'Share Tech Mono',monospace",fontSize:11,letterSpacing:2}}>NO SUPPRESSORS REGISTERED</div>}
+              {suppressors.map(s => {
+                const tot=rdsBySupp[s.id]||0, yrR=rdsBySuppYr[s.id]||0, isOpen=openSupp===s.id;
+                const hasDue=(s.pmcsSchedule||[]).some(p=>suppPmcsAlerts.find(a=>a.sId===s.id&&a.pId===p.id&&a.isDue));
+                return (
+                  <div key={s.id} style={{background:G.card,border:`1px solid ${hasDue?G.green+'55':G.border}`,borderLeft:`3px solid ${G.green}44`,borderRadius:2,marginBottom:9,overflow:'hidden'}}>
+                    <div style={chStyle} onClick={()=>setOpenSupp(isOpen?null:s.id)}>
+                      <span style={{color:G.dim,fontSize:11}}>{isOpen?'▾':'▸'}</span>
+                      <div style={{flex:1}}>
+                        <div style={{display:'flex',alignItems:'center',gap:7}}>
+                          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:600,letterSpacing:1,color:G.text,flex:1}}>{s.make} {s.model}</div>
+                          {hasDue && <span style={{fontSize:9,letterSpacing:1,color:G.green,background:`${G.green}20`,border:`1px solid ${G.green}44`,padding:'2px 5px',borderRadius:2,textTransform:'uppercase',fontFamily:"'Oswald',sans-serif"}}>SERVICE DUE</span>}
+                        </div>
+                        <div style={{fontSize:10,color:G.dim,marginTop:2,fontFamily:"'Share Tech Mono',monospace"}}>
+                          {s.mount||'—'}{s.serial?` · SN: ${s.serial}`:''}
+                        </div>
+                      </div>
+                      <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:G.green,background:`${G.green}18`,padding:'3px 7px',border:`1px solid ${G.green}33`,borderRadius:1,marginRight:4}}>{s.caliber||'—'}</span>
+                      <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:G.muted}}>{tot.toLocaleString()} rds</span>
+                    </div>
+                    {isOpen && (
+                      <div style={cbStyle}>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:9}}>
+                          <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Rounds This Year</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:G.green}}>{yrR.toLocaleString()}</div></div>
+                          <div><div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:3}}>Lifetime Rounds</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:20,color:G.green}}>{tot.toLocaleString()}</div></div>
+                        </div>
+
+                        {/* Suppressor details */}
+                        <div style={{background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,padding:10,marginBottom:10}}>
+                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
+                            {s.mount && <div><span style={{fontSize:10,color:G.dim,letterSpacing:1,textTransform:'uppercase'}}>Mount: </span><span style={{fontSize:12,color:G.muted}}>{s.mount}</span></div>}
+                            {s.baffle && <div><span style={{fontSize:10,color:G.dim,letterSpacing:1,textTransform:'uppercase'}}>Baffle: </span><span style={{fontSize:12,color:G.muted}}>{s.baffle}</span></div>}
+                            {s.serial && <div><span style={{fontSize:10,color:G.dim,letterSpacing:1,textTransform:'uppercase'}}>Serial: </span><span style={{fontSize:12,color:G.muted,fontFamily:"'Share Tech Mono',monospace"}}>{s.serial}</span></div>}
+                            {s.nfaNum && <div><span style={{fontSize:10,color:G.dim,letterSpacing:1,textTransform:'uppercase'}}>NFA #: </span><span style={{fontSize:12,color:G.muted,fontFamily:"'Share Tech Mono',monospace"}}>{s.nfaNum}</span></div>}
+                            {s.mfgDate && <div><span style={{fontSize:10,color:G.dim,letterSpacing:1,textTransform:'uppercase'}}>Approval Date: </span><span style={{fontSize:12,color:G.muted}}>{fmtDate(s.mfgDate)}</span></div>}
+                          </div>
+                        </div>
+
+                        {/* Suppressor PMCS */}
+                        {(s.pmcsSchedule||[]).length>0 && (
+                          <div style={{marginTop:4}}>
+                            <div style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase',marginBottom:7}}>Service Schedule</div>
+                            {(s.pmcsSchedule||[]).map(p => {
+                              const al=suppPmcsAlerts.find(a=>a.sId===s.id&&a.pId===p.id);
+                              if(!al) return null;
+                              const {isDue,pct,since,left,interval}=al;
+                              const bc=isDue?G.danger:pct>=80?G.accent:G.green;
+                              return (
+                                <div key={p.id} style={{background:G.bg,border:`1px solid ${isDue?G.danger+'55':G.border}`,borderLeft:`3px solid ${bc}`,borderRadius:1,padding:'9px 11px',marginBottom:7}}>
+                                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:5}}>
+                                    <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:G.text,marginBottom:2}}>{p.task}</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted}}>Every {interval.toLocaleString()} rds · {since.toLocaleString()} since service</div></div>
+                                    {isDue ? <button style={{...btnP,...btnSm,background:G.green,flexShrink:0,marginLeft:9}} onClick={()=>markSuppSvc(s.id,p.id)}>Mark Serviced</button> : <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,marginLeft:9,flexShrink:0}}>{left.toLocaleString()} rds left</span>}
+                                  </div>
+                                  <div style={barWrap}><div style={{height:'100%',width:`${pct}%`,background:bc,borderRadius:2,transition:'width 0.4s ease'}}/></div>
+                                  {isDue && <div style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginTop:4}}>⚙ SERVICE DUE</div>}
                                 </div>
-                                {isDue
-                                  ? <button style={{...btnP,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>markSvc(f.id,p.id)}>Mark Serviced</button>
-                                  : <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,marginLeft:9,flexShrink:0}}>{left.toLocaleString()} rds left</span>}
-                              </div>
-                              <div style={barWrap}><div style={{height:'100%',width:`${pct}%`,background:bc,borderRadius:2,transition:'width 0.4s ease'}}/></div>
-                              {isDue && <div style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginTop:4}}>⚙ SERVICE DUE</div>}
-                            </div>
-                          );
-                        })}
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {s.notes && <div style={{fontSize:12,color:G.muted,marginTop:9}}>Notes: {s.notes}</div>}
+                        <div style={{display:'flex',gap:7,marginTop:11}}>
+                          <button style={{...btnG,...btnSm}} onClick={()=>{setEditSupp(s);setShowSupp(true);}}>Edit</button>
+                          <button style={btnD} onClick={()=>delSupp(s.id)}>Remove</button>
+                        </div>
                       </div>
                     )}
-
-                    {f.notes && <div style={{fontSize:12,color:G.muted,marginTop:9}}>Notes: {f.notes}</div>}
-                    <div style={{display:'flex',gap:7,marginTop:11}}>
-                      <button style={{...btnG,...btnSm}} onClick={()=>{setEditFA(f);setShowFA(true);}}>Edit</button>
-                      <button style={btnD} onClick={()=>delFA(f.id)}>Remove</button>
-                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -683,7 +1122,7 @@ function App() {
         <div style={pgStyle}>
           {/* Sub-tabs */}
           <div style={{display:'flex',borderBottom:`1px solid ${G.border}`,marginBottom:16}}>
-            {[['overview','Overview'],['firearms','By Firearm'],['positions','By Position']].map(([k,l]) => (
+            {[['overview','Overview'],['firearms','By Firearm'],['positions','By Position'],['export','Export']].map(([k,l]) => (
               <button key={k} onClick={()=>setStatSub(k)} style={{fontFamily:"'Oswald',sans-serif",fontSize:11,letterSpacing:2,textTransform:'uppercase',padding:'9px 0',border:'none',background:'none',cursor:'pointer',color:statSub===k?G.accent:G.muted,borderBottom:`2px solid ${statSub===k?G.accent:'transparent'}`,marginBottom:-1,flex:1,transition:'color 0.15s'}}>
                 {l}
               </button>
@@ -709,6 +1148,27 @@ function App() {
                   </div>
                 ))}
               </div>
+              {suppressors.length > 0 && (
+                <div style={{marginBottom:18}}>
+                  <div style={stStyle}>SUPPRESSED FIRE</div>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:9}}>
+                    <div style={{...scardStyle, borderColor:`${G.green}44`, borderLeft:`3px solid ${G.green}`}}>
+                      <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:24,color:G.green,lineHeight:1,marginBottom:4}}>{suppRdsLife.toLocaleString()}</div>
+                      <div style={{fontSize:9,letterSpacing:2,textTransform:'uppercase',color:G.muted}}>Lifetime Suppressed</div>
+                    </div>
+                    <div style={{...scardStyle, borderColor:`${G.green}44`, borderLeft:`3px solid ${G.green}`}}>
+                      <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:24,color:G.green,lineHeight:1,marginBottom:4}}>{suppRdsYr.toLocaleString()}</div>
+                      <div style={{fontSize:9,letterSpacing:2,textTransform:'uppercase',color:G.muted}}>Suppressed {curYear()}</div>
+                    </div>
+                    <div style={{...scardStyle, borderColor:`${G.green}44`, borderLeft:`3px solid ${G.green}`}}>
+                      <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:24,color:G.green,lineHeight:1,marginBottom:4}}>
+                        {lifeRds > 0 ? Math.round((suppRdsLife/lifeRds)*100) : 0}%
+                      </div>
+                      <div style={{fontSize:9,letterSpacing:2,textTransform:'uppercase',color:G.muted}}>Of All Rounds</div>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div style={stStyle}>RECENT SESSIONS</div>
               <div style={{...cardStyle}}>
                 <div style={{padding:0}}>
@@ -799,12 +1259,93 @@ function App() {
               )}
             </div>
           )}
+
+          {/* Export */}
+          {statSub==='export' && (
+            <div>
+              <div style={stStyle}>BACKUP & EXPORT</div>
+
+              {/* Summary */}
+              <div style={{...cardStyle, padding:'12px 14px', marginBottom:14}}>
+                <div style={{fontSize:12, color:G.muted, marginBottom:10}}>Current data stored on this device:</div>
+                <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8, marginBottom:0}}>
+                  {[
+                    [firearms.length, 'Firearms'],
+                    [suppressors.length, 'Suppressors'],
+                    [sessions.length, 'Sessions'],
+                  ].map(([n,l]) => (
+                    <div key={l} style={{background:G.bg, borderRadius:1, padding:'9px 10px', textAlign:'center'}}>
+                      <div style={{fontFamily:"'Share Tech Mono',monospace", fontSize:22, color:G.accent, lineHeight:1, marginBottom:3}}>{n}</div>
+                      <div style={{fontSize:9, letterSpacing:2, textTransform:'uppercase', color:G.muted}}>{l}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* JSON Backup */}
+              <div style={stStyle}>FULL BACKUP</div>
+              <div style={{...cardStyle, padding:'14px'}}>
+                <div style={{fontSize:13, color:G.text, fontWeight:600, marginBottom:4}}>JSON Backup</div>
+                <div style={{fontSize:12, color:G.muted, marginBottom:12, lineHeight:1.6}}>
+                  Exports all firearms, suppressors, sessions, PMCS schedules, and malfunction logs as a single JSON file. Use this to back up your data or transfer it to a new device.
+                </div>
+                <button style={{...btnP, width:'100%', textAlign:'center'}} onClick={exportJSON}>
+                  ↓ Download Full Backup (.json)
+                </button>
+              </div>
+
+              {/* CSV Exports */}
+              <div style={stStyle}>SPREADSHEET EXPORT</div>
+              <div style={{...cardStyle, padding:'14px', marginBottom:10}}>
+                <div style={{fontSize:13, color:G.text, fontWeight:600, marginBottom:4}}>Sessions Log (CSV)</div>
+                <div style={{fontSize:12, color:G.muted, marginBottom:12, lineHeight:1.6}}>
+                  One row per firearm per session. Includes date, location, rounds, suppressor, ammo, position, score, malfunctions, and notes. Opens in Excel or Google Sheets.
+                </div>
+                <button style={{...btnG, width:'100%', textAlign:'center'}} onClick={exportCSV}>
+                  ↓ Download Sessions CSV
+                </button>
+              </div>
+              {suppressors.length > 0 && (
+                <div style={{...cardStyle, padding:'14px', marginBottom:10}}>
+                  <div style={{fontSize:13, color:G.text, fontWeight:600, marginBottom:4}}>Suppressors (CSV)</div>
+                  <div style={{fontSize:12, color:G.muted, marginBottom:12, lineHeight:1.6}}>
+                    Exports your suppressor registry with all NFA info, lifetime rounds, and notes.
+                  </div>
+                  <button style={{...btnG, width:'100%', textAlign:'center'}} onClick={exportSuppressorsCSV}>
+                    ↓ Download Suppressors CSV
+                  </button>
+                </div>
+              )}
+
+              {/* Import */}
+              <div style={stStyle}>RESTORE FROM BACKUP</div>
+              <div style={{...cardStyle, padding:'14px'}}>
+                <div style={{fontSize:13, color:G.text, fontWeight:600, marginBottom:4}}>Import JSON Backup</div>
+                <div style={{fontSize:12, color:G.muted, marginBottom:4, lineHeight:1.6}}>
+                  Restore a previously exported JSON backup. This replaces all current data on this device.
+                </div>
+                <div style={{fontSize:11, color:G.danger, marginBottom:12}}>
+                  ⚠ Warning: importing will overwrite your existing data. Export a backup first if needed.
+                </div>
+                <label style={{...btnG, display:'block', textAlign:'center', cursor:'pointer', padding:'10px 15px', fontFamily:"'Oswald',sans-serif", fontSize:12, letterSpacing:2, textTransform:'uppercase', color:G.muted}}>
+                  ↑ Choose Backup File (.json)
+                  <input type="file" accept=".json,application/json" onChange={handleImport} style={{display:'none'}}/>
+                </label>
+                {importMsg && (
+                  <div style={{marginTop:10, padding:'9px 12px', borderRadius:1, background:importMsg.ok?`${G.green}15`:`${G.danger}15`, border:`1px solid ${importMsg.ok?G.green+'44':G.danger+'44'}`, fontSize:12, color:importMsg.ok?G.green:G.danger}}>
+                    {importMsg.ok ? '✓ ' : '✕ '}{importMsg.text}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Modals */}
-      {showSess && <SessionModal firearms={firearms} existing={editSess} onSave={saveSess} onClose={()=>{setShowSess(false);setEditSess(null);}}/>}
+      {showSess && <SessionModal firearms={firearms} suppressors={suppressors} existing={editSess} onSave={saveSess} onClose={()=>{setShowSess(false);setEditSess(null);}}/>}
       {showFA && <FirearmModal existing={editFA} onSave={saveFA} onClose={()=>{setShowFA(false);setEditFA(null);}}/>}
+      {showSupp && <SuppressorModal existing={editSupp} onSave={saveSupp} onClose={()=>{setShowSupp(false);setEditSupp(null);}}/>}
     </div>
   );
 }
