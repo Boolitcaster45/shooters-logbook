@@ -719,16 +719,17 @@ function LoadModal({mode, existing, onSave, onDuplicate, onClose}) {
     return {loadName:'',date:todayStr(),gun:'',caliber:'',primerBrand:'',primerType:'',powderType:'',powderCharge:'',bulletWeight:'',bulletType:'',oal:'',velocity:'',notes:''};
   });
   const warnings = calcWarnings(form);
-  const upd = ch => setForm(f=>({...f,...ch}));
+  // upd returns a stable onChange handler per field — avoids remounting inputs
+  const upd = k => e => setForm(f=>({...f,[k]:e.target.value}));
   const save = () => { if(!form.loadName) return; onSave({...form,id:existing?.id||uid()}); onClose(); };
 
   const modalStyle = {background:G.surface,borderTop:`2px solid ${G.accent}`,border:`1px solid ${G.border}`,width:'100%',maxWidth:640,maxHeight:'92dvh',overflowY:'auto',borderRadius:'8px 8px 0 0',padding:'18px 15px 30px'};
-
-  const FieldRow = ({label, field, type='text', placeholder='', half=false}) => (
-    <div style={{...fc, marginBottom:0}}>
+  const sHdr = {fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`};
+  // F() renders a labelled input inline — NOT a component, so no remount on each keystroke
+  const F = (field, label, type='text', ph='') => (
+    <div style={{...fc,marginBottom:0}}>
       <label style={lbl}>{label}</label>
-      <input style={inp} type={type} placeholder={placeholder} value={form[field]||''}
-        onChange={e=>upd({[field]:e.target.value})}/>
+      <input style={inp} type={type} placeholder={ph} value={form[field]||''} onChange={upd(field)}/>
     </div>
   );
 
@@ -778,46 +779,30 @@ function LoadModal({mode, existing, onSave, onDuplicate, onClose}) {
             </div>
           </div>
         ) : (
-          // ── Form ──
           <div>
-            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',marginBottom:10,paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Load Identity</div>
-            <div style={fr}>
-              <FieldRow label="Load Name *" field="loadName" placeholder="e.g. 45 ACP 230gr Standard"/>
-              <FieldRow label="Date" field="date" type="date"/>
-            </div>
-            <div style={fr}>
-              <FieldRow label="Firearm" field="gun" placeholder="e.g. 1911 Government"/>
-              <FieldRow label="Caliber" field="caliber" placeholder="e.g. .45 ACP"/>
-            </div>
+            <div style={sHdr}>Load Identity</div>
+            <div style={fr}>{F('loadName','Load Name *','text','e.g. 45 ACP 230gr Standard')}{F('date','Date','date')}</div>
+            <div style={fr}>{F('gun','Firearm','text','e.g. 1911 Government')}{F('caliber','Caliber','text','e.g. .45 ACP')}</div>
 
-            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Primer</div>
-            <div style={fr}>
-              <FieldRow label="Brand" field="primerBrand" placeholder="e.g. CCI, Federal"/>
-              <FieldRow label="Type" field="primerType" placeholder="e.g. Large Pistol"/>
-            </div>
+            <div style={sHdr}>Primer</div>
+            <div style={fr}>{F('primerBrand','Brand','text','e.g. CCI, Federal')}{F('primerType','Type','text','e.g. Large Pistol')}</div>
 
-            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Powder</div>
-            <div style={fr}>
-              <FieldRow label="Powder" field="powderType" placeholder="e.g. Hodgdon Titegroup"/>
-              <FieldRow label="Charge (gr)" field="powderCharge" type="number" placeholder="e.g. 4.2"/>
-            </div>
+            <div style={sHdr}>Powder</div>
+            <div style={fr}>{F('powderType','Powder','text','e.g. Hodgdon Titegroup')}{F('powderCharge','Charge (gr)','number','e.g. 4.2')}</div>
 
-            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Projectile</div>
+            <div style={sHdr}>Projectile</div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:9}}>
-              <div style={{...fc,marginBottom:0}}><label style={lbl}>Weight (gr)</label><input style={inp} type="number" placeholder="e.g. 230" value={form.bulletWeight||''} onChange={e=>upd({bulletWeight:e.target.value})}/></div>
-              <div style={{...fc,marginBottom:0}}><label style={lbl}>Type / Style</label><input style={inp} type="text" placeholder="e.g. 230gr RN Cast" value={form.bulletType||''} onChange={e=>upd({bulletType:e.target.value})}/></div>
-              <div style={{...fc,marginBottom:0}}><label style={lbl}>OAL (in)</label><input style={inp} type="number" placeholder='e.g. 1.275' value={form.oal||''} onChange={e=>upd({oal:e.target.value})}/></div>
+              {F('bulletWeight','Weight (gr)','number','e.g. 230')}
+              {F('bulletType','Type / Style','text','e.g. 230gr RN Cast')}
+              {F('oal','OAL (in)','number','e.g. 1.275')}
             </div>
 
-            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Performance</div>
-            <div style={fr}>
-              <div style={{...fc,marginBottom:0}}><label style={lbl}>Velocity (fps)</label><input style={inp} type="number" placeholder="e.g. 830" value={form.velocity||''} onChange={e=>upd({velocity:e.target.value})}/></div>
-              <div style={{...fc,marginBottom:0}}/>
-            </div>
+            <div style={sHdr}>Performance</div>
+            <div style={fr}>{F('velocity','Velocity (fps)','number','e.g. 830')}<div style={{...fc,marginBottom:0}}/></div>
 
-            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Notes</div>
+            <div style={sHdr}>Notes</div>
             <div style={{...fc,marginBottom:14}}>
-              <textarea style={{...inp,resize:'vertical',minHeight:65,fontSize:14}} placeholder="Observations, accuracy, reliability, recoil..." value={form.notes||''} onChange={e=>upd({notes:e.target.value})}/>
+              <textarea style={{...inp,resize:'vertical',minHeight:65,fontSize:14}} placeholder="Observations, accuracy, reliability, recoil..." value={form.notes||''} onChange={upd('notes')}/>
             </div>
 
             <div style={{display:'flex',gap:9,justifyContent:'flex-end',paddingTop:13,borderTop:`1px solid ${G.border}`}}>
