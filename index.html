@@ -712,105 +712,114 @@ function calcWarnings(ld) {
   return w;
 }
 
-function LoadModal({mode, existing, onSave, onDuplicate, onClose}) {
-  const isView = mode==='view';
-  const [form, setForm] = useState(() => {
-    if(existing) return {...existing};
-    return {loadName:'',date:todayStr(),gun:'',caliber:'',primerBrand:'',primerType:'',powderType:'',powderCharge:'',bulletWeight:'',bulletType:'',oal:'',velocity:'',notes:''};
-  });
-  const warnings = calcWarnings(form);
-  // upd returns a stable onChange handler per field — avoids remounting inputs
-  const upd = k => e => setForm(f=>({...f,[k]:e.target.value}));
-  const save = () => { if(!form.loadName) return; onSave({...form,id:existing?.id||uid()}); onClose(); };
-
-  const modalStyle = {background:G.surface,borderTop:`2px solid ${G.accent}`,border:`1px solid ${G.border}`,width:'100%',maxWidth:640,maxHeight:'92dvh',overflowY:'auto',borderRadius:'8px 8px 0 0',padding:'18px 15px 30px'};
-  const sHdr = {fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`};
-  // F() renders a labelled input inline — NOT a component, so no remount on each keystroke
-  const F = (field, label, type='text', ph='') => (
-    <div style={{...fc,marginBottom:0}}>
-      <label style={lbl}>{label}</label>
-      <input style={inp} type={type} placeholder={ph} value={form[field]||''} onChange={upd(field)}/>
+// ── LoadDetailModal (read-only, no inputs) ─────────────────────────────────────
+function LoadDetailModal({existing, onDuplicate, onEditRequest, onClose}) {
+  const warnings = calcWarnings(existing||{});
+  const ms = {background:G.surface,borderTop:`2px solid ${G.accent}`,border:`1px solid ${G.border}`,width:'100%',maxWidth:640,maxHeight:'92dvh',overflowY:'auto',borderRadius:'8px 8px 0 0',padding:'18px 15px 30px'};
+  return (
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div style={ms}>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,letterSpacing:3,textTransform:'uppercase',color:G.accent,marginBottom:16,paddingBottom:10,borderBottom:`1px solid ${G.border}`}}>{existing?.loadName||'Load Detail'}</div>
+        {warnings.length>0&&<div style={{background:`${G.danger}10`,border:`1px solid ${G.danger}44`,borderLeft:`3px solid ${G.danger}`,borderRadius:1,padding:'10px 12px',marginBottom:14}}><div style={{fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginBottom:6}}>⚠ SAAMI Reference Warnings</div>{warnings.map((w,i)=><div key={i} style={{fontSize:12,color:G.danger,marginBottom:2}}>· {w}</div>)}</div>}
+        {[['Firearm',existing?.gun],['Caliber',existing?.caliber],['Primer Brand',existing?.primerBrand],['Primer Type',existing?.primerType],['Powder',existing?.powderType],['Charge',existing?.powderCharge?existing.powderCharge+' gr':''],['Bullet Weight',existing?.bulletWeight?existing.bulletWeight+' gr':''],['Bullet Type',existing?.bulletType],['OAL',existing?.oal?existing.oal+'"':''],['Velocity',existing?.velocity?existing.velocity+' fps':''],['Date',existing?.date]].filter(([,v])=>v).map(([k,v])=>(
+          <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',padding:'8px 0',borderBottom:`1px solid ${G.border}`}}>
+            <span style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase'}}>{k}</span>
+            <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:G.text,textAlign:'right'}}>{v}</span>
+          </div>
+        ))}
+        {existing?.notes&&<div style={{marginTop:10,padding:10,background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:G.muted,lineHeight:1.7,whiteSpace:'pre-wrap'}}>{existing.notes}</div>}
+        <div style={{display:'flex',gap:9,marginTop:16,paddingTop:13,borderTop:`1px solid ${G.border}`}}>
+          <button style={btnG} onClick={onClose}>Close</button>
+          <button style={btnG} onClick={()=>{onDuplicate(existing.id);onClose();}}>Duplicate</button>
+          <button style={{...btnP,marginLeft:'auto'}} onClick={onEditRequest}>Edit Load</button>
+        </div>
+      </div>
     </div>
   );
+}
+
+// ── LoadFormModal (add/edit — one useState per field, keyboard stays up on iOS) ─
+function LoadFormModal({existing, onSave, onClose}) {
+  const [loadName,     setLoadName]     = useState(existing?.loadName     || '');
+  const [date,         setDate]         = useState(existing?.date         || todayStr());
+  const [gun,          setGun]          = useState(existing?.gun          || '');
+  const [caliber,      setCaliber]      = useState(existing?.caliber      || '');
+  const [primerBrand,  setPrimerBrand]  = useState(existing?.primerBrand  || '');
+  const [primerType,   setPrimerType]   = useState(existing?.primerType   || '');
+  const [powderType,   setPowderType]   = useState(existing?.powderType   || '');
+  const [powderCharge, setPowderCharge] = useState(existing?.powderCharge || '');
+  const [bulletWeight, setBulletWeight] = useState(existing?.bulletWeight || '');
+  const [bulletType,   setBulletType]   = useState(existing?.bulletType   || '');
+  const [oal,          setOal]          = useState(existing?.oal          || '');
+  const [velocity,     setVelocity]     = useState(existing?.velocity     || '');
+  const [notes,        setNotes]        = useState(existing?.notes        || '');
+
+  // Warnings computed only from the three fields that trigger them; doesn't affect input identity
+  const warnings = calcWarnings({caliber, oal, velocity});
+
+  const save = () => {
+    if (!loadName.trim()) return;
+    onSave({id:existing?.id||uid(),loadName,date,gun,caliber,primerBrand,primerType,powderType,powderCharge,bulletWeight,bulletType,oal,velocity,notes});
+    onClose();
+  };
+
+  const ms = {background:G.surface,borderTop:`2px solid ${G.accent}`,border:`1px solid ${G.border}`,width:'100%',maxWidth:640,maxHeight:'92dvh',overflowY:'auto',borderRadius:'8px 8px 0 0',padding:'18px 15px 30px'};
+  const sh = mt => ({fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',paddingBottom:6,borderBottom:`1px solid ${G.border}`,marginBottom:10,marginTop:mt||0});
 
   return (
     <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
-      <div style={modalStyle}>
-        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,letterSpacing:3,textTransform:'uppercase',color:G.accent,marginBottom:16,paddingBottom:10,borderBottom:`1px solid ${G.border}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-          <span>{isView ? (existing?.loadName||'Load Detail') : (mode==='add'?'New Load':'Edit Load')}</span>
-          {isView && <button style={{...btnG,...btnSm,fontSize:11}} onClick={onClose}>Close</button>}
+      <div style={ms}>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,letterSpacing:3,textTransform:'uppercase',color:G.accent,marginBottom:16,paddingBottom:10,borderBottom:`1px solid ${G.border}`}}>{existing?'Edit Load':'New Load'}</div>
+
+        {/* Warning banner occupies fixed space so inputs don't shift position when it appears */}
+        <div style={{marginBottom:warnings.length>0?14:0}}>
+          {warnings.length>0&&<div style={{background:`${G.danger}10`,border:`1px solid ${G.danger}44`,borderLeft:`3px solid ${G.danger}`,borderRadius:1,padding:'10px 12px'}}><div style={{fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginBottom:6}}>⚠ SAAMI Reference Warnings</div>{warnings.map((w,i)=><div key={i} style={{fontSize:12,color:G.danger,marginBottom:2}}>· {w}</div>)}</div>}
         </div>
 
-        {/* SAAMI warnings */}
-        {warnings.length>0 && (
-          <div style={{background:`${G.danger}10`,border:`1px solid ${G.danger}44`,borderLeft:`3px solid ${G.danger}`,borderRadius:1,padding:'10px 12px',marginBottom:14}}>
-            <div style={{fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginBottom:6}}>⚠ SAAMI Reference Warnings</div>
-            {warnings.map((w,i)=><div key={i} style={{fontSize:12,color:G.danger,marginBottom:2}}>· {w}</div>)}
-          </div>
-        )}
+        <div style={sh(0)}>Load Identity</div>
+        <div style={fr}>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Load Name *</label><input style={inp} type="text" placeholder="e.g. 45 ACP 230gr Standard" value={loadName} onChange={e=>setLoadName(e.target.value)}/></div>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Date</label><input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+        </div>
+        <div style={fr}>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Firearm</label><input style={inp} type="text" placeholder="e.g. 1911 Government" value={gun} onChange={e=>setGun(e.target.value)}/></div>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Caliber</label><input style={inp} type="text" placeholder="e.g. .45 ACP" value={caliber} onChange={e=>setCaliber(e.target.value)}/></div>
+        </div>
 
-        {isView ? (
-          // ── Detail view ──
-          <div>
-            {[
-              ['Firearm',existing?.gun],['Caliber',existing?.caliber],
-              ['Primer Brand',existing?.primerBrand],['Primer Type',existing?.primerType],
-              ['Powder',existing?.powderType],['Charge',existing?.powderCharge?existing.powderCharge+' gr':''],
-              ['Bullet Weight',existing?.bulletWeight?existing.bulletWeight+' gr':''],
-              ['Bullet Type',existing?.bulletType],
-              ['OAL',existing?.oal?existing.oal+'"':''],
-              ['Velocity',existing?.velocity?existing.velocity+' fps':''],
-              ['Date',existing?.date],
-            ].filter(([,v])=>v).map(([k,v])=>(
-              <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',padding:'8px 0',borderBottom:`1px solid ${G.border}`}}>
-                <span style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase'}}>{k}</span>
-                <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:G.text,textAlign:'right'}}>{v}</span>
-              </div>
-            ))}
-            {existing?.notes && (
-              <div style={{marginTop:10,padding:10,background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:G.muted,lineHeight:1.7,whiteSpace:'pre-wrap'}}>
-                {existing.notes}
-              </div>
-            )}
-            <div style={{display:'flex',gap:9,marginTop:16,paddingTop:13,borderTop:`1px solid ${G.border}`}}>
-              <button style={btnG} onClick={onClose}>Close</button>
-              <button style={btnG} onClick={()=>{onDuplicate(existing.id);onClose();}}>Duplicate</button>
-              <button style={{...btnP,marginLeft:'auto'}} onClick={()=>{/* parent will switch mode */onClose();}}>Edit Load</button>
-            </div>
-          </div>
-        ) : (
-          <div>
-            <div style={sHdr}>Load Identity</div>
-            <div style={fr}>{F('loadName','Load Name *','text','e.g. 45 ACP 230gr Standard')}{F('date','Date','date')}</div>
-            <div style={fr}>{F('gun','Firearm','text','e.g. 1911 Government')}{F('caliber','Caliber','text','e.g. .45 ACP')}</div>
+        <div style={sh(14)}>Primer</div>
+        <div style={fr}>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Brand</label><input style={inp} type="text" placeholder="e.g. CCI, Federal" value={primerBrand} onChange={e=>setPrimerBrand(e.target.value)}/></div>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Type</label><input style={inp} type="text" placeholder="e.g. Large Pistol" value={primerType} onChange={e=>setPrimerType(e.target.value)}/></div>
+        </div>
 
-            <div style={sHdr}>Primer</div>
-            <div style={fr}>{F('primerBrand','Brand','text','e.g. CCI, Federal')}{F('primerType','Type','text','e.g. Large Pistol')}</div>
+        <div style={sh(14)}>Powder</div>
+        <div style={fr}>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Powder</label><input style={inp} type="text" placeholder="e.g. Hodgdon Titegroup" value={powderType} onChange={e=>setPowderType(e.target.value)}/></div>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Charge (gr)</label><input style={inp} type="number" placeholder="e.g. 4.2" value={powderCharge} onChange={e=>setPowderCharge(e.target.value)}/></div>
+        </div>
 
-            <div style={sHdr}>Powder</div>
-            <div style={fr}>{F('powderType','Powder','text','e.g. Hodgdon Titegroup')}{F('powderCharge','Charge (gr)','number','e.g. 4.2')}</div>
+        <div style={sh(14)}>Projectile</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9}}>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Weight (gr)</label><input style={inp} type="number" placeholder="e.g. 230" value={bulletWeight} onChange={e=>setBulletWeight(e.target.value)}/></div>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Type / Style</label><input style={inp} type="text" placeholder="e.g. 230gr RN Cast" value={bulletType} onChange={e=>setBulletType(e.target.value)}/></div>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>OAL (in)</label><input style={inp} type="number" placeholder="e.g. 1.275" value={oal} onChange={e=>setOal(e.target.value)}/></div>
+        </div>
 
-            <div style={sHdr}>Projectile</div>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:9}}>
-              {F('bulletWeight','Weight (gr)','number','e.g. 230')}
-              {F('bulletType','Type / Style','text','e.g. 230gr RN Cast')}
-              {F('oal','OAL (in)','number','e.g. 1.275')}
-            </div>
+        <div style={sh(14)}>Performance</div>
+        <div style={fr}>
+          <div style={{...fc,marginBottom:0}}><label style={lbl}>Velocity (fps)</label><input style={inp} type="number" placeholder="e.g. 830" value={velocity} onChange={e=>setVelocity(e.target.value)}/></div>
+          <div style={{...fc,marginBottom:0}}/>
+        </div>
 
-            <div style={sHdr}>Performance</div>
-            <div style={fr}>{F('velocity','Velocity (fps)','number','e.g. 830')}<div style={{...fc,marginBottom:0}}/></div>
+        <div style={sh(14)}>Notes</div>
+        <div style={{...fc,marginBottom:14}}>
+          <textarea style={{...inp,resize:'vertical',minHeight:65,fontSize:14}} placeholder="Observations, accuracy, reliability, recoil..." value={notes} onChange={e=>setNotes(e.target.value)}/>
+        </div>
 
-            <div style={sHdr}>Notes</div>
-            <div style={{...fc,marginBottom:14}}>
-              <textarea style={{...inp,resize:'vertical',minHeight:65,fontSize:14}} placeholder="Observations, accuracy, reliability, recoil..." value={form.notes||''} onChange={upd('notes')}/>
-            </div>
-
-            <div style={{display:'flex',gap:9,justifyContent:'flex-end',paddingTop:13,borderTop:`1px solid ${G.border}`}}>
-              <button style={btnG} onClick={onClose}>Cancel</button>
-              <button style={btnP} onClick={save}>{mode==='add'?'Add Load':'Save Changes'}</button>
-            </div>
-          </div>
-        )}
+        <div style={{display:'flex',gap:9,justifyContent:'flex-end',paddingTop:13,borderTop:`1px solid ${G.border}`}}>
+          <button style={btnG} onClick={onClose}>Cancel</button>
+          <button style={btnP} onClick={save}>{existing?'Save Changes':'Add Load'}</button>
+        </div>
       </div>
     </div>
   );
@@ -1936,16 +1945,19 @@ function App() {
       {showSess && <SessionModal firearms={firearms} suppressors={suppressors} existing={editSess} onSave={saveSess} onClose={()=>{setShowSess(false);setEditSess(null);}}/>}
       {showFA && <FirearmModal existing={editFA} onSave={saveFA} onClose={()=>{setShowFA(false);setEditFA(null);}}/>}
       {showSupp && <SuppressorModal existing={editSupp} onSave={saveSupp} onClose={()=>{setShowSupp(false);setEditSupp(null);}}/>}
-      {showLoadModal && (
-        <LoadModal
-          mode={loadModalMode}
+      {showLoadModal && loadModalMode==='view' && editingLoad && (
+        <LoadDetailModal
           existing={editingLoad}
-          onSave={saveLoad}
           onDuplicate={duplicateLoad}
-          onClose={()=>{
-            if(loadModalMode==='view'){setShowLoadModal(false);setEditingLoad(null);}
-            else{setShowLoadModal(false);setEditingLoad(null);}
-          }}
+          onEditRequest={()=>{ setLoadModalMode('edit'); }}
+          onClose={()=>{setShowLoadModal(false);setEditingLoad(null);}}
+        />
+      )}
+      {showLoadModal && (loadModalMode==='add'||loadModalMode==='edit') && (
+        <LoadFormModal
+          existing={loadModalMode==='edit'?editingLoad:null}
+          onSave={saveLoad}
+          onClose={()=>{setShowLoadModal(false);setEditingLoad(null);}}
         />
       )}
     </div>
