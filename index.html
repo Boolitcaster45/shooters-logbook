@@ -87,7 +87,7 @@ const DEFAULT_FA = [
   {id:'fa1',make:'Glock',model:'19',caliber:'9mm',serial:'',type:'Pistol',notes:'Gen 5',pmcsSchedule:[]},
   {id:'fa2',make:'Colt',model:'1911',caliber:'.45 ACP',serial:'',type:'Pistol',notes:'',pmcsSchedule:[]},
 ];
-const blankGun = () => ({id:uid(),firearmsId:'',rounds:0,ammoLoad:'',distance:'',targetType:'',position:'',notes:'',malfunctionLog:[],score:''});
+const blankGun = () => ({id:uid(),firearmsId:'',guestMode:false,guestMake:'',guestModel:'',guestCaliber:'',rounds:0,guestRounds:0,ammoLoad:'',distance:'',targetType:'',position:'',notes:'',malfunctionLog:[],score:''});
 
 // ── Shared style helpers ───────────────────────────────────────────────────────
 const inp = {width:'100%',background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,color:G.text,fontFamily:"'Barlow',sans-serif",fontSize:16,padding:'10px 11px',outline:'none',WebkitAppearance:'none',appearance:'none'};
@@ -167,32 +167,110 @@ function toUSNG(lat, lng, precision=5) {
 
 // ── GunEntryForm ───────────────────────────────────────────────────────────────
 function GunEntryForm({firearms, suppressors, entry, onChange, onRemove}) {
-  const fa = firearms.find(f => f.id === entry.firearmsId);
+  const isGuest = entry.guestMode === true;
+  const fa = !isGuest && firearms.find(f => f.id === entry.firearmsId);
+  const displayName = isGuest
+    ? [entry.guestMake, entry.guestModel].filter(Boolean).join(' ') || '— Guest Firearm —'
+    : fa ? `${fa.make} ${fa.model}` : '— Select Firearm —';
   const upd = ch => onChange({...entry, ...ch});
   const mals = entry.malfunctionLog || [];
 
   return (
-    <div style={{background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,padding:10,marginBottom:8}}>
+    <div style={{background:G.bg,border:`1px solid ${isGuest?G.accentD:G.border}`,borderStyle:isGuest?'dashed':'solid',borderRadius:1,padding:10,marginBottom:8}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:9}}>
-        <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,letterSpacing:1,color:G.text}}>
-          {fa ? `${fa.make} ${fa.model}` : '— Select Firearm —'}
-        </span>
-        <button style={btnD} onClick={onRemove}>✕</button>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,letterSpacing:1,color:isGuest?G.accentD:G.text}}>{displayName}</span>
+          {isGuest && <span style={{fontFamily:"'Oswald',sans-serif",fontSize:9,letterSpacing:2,textTransform:'uppercase',color:G.accentD,background:`${G.accentD}22`,border:`1px solid ${G.accentD}44`,padding:'2px 5px',borderRadius:1}}>GUEST</span>}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <button
+            onClick={() => upd({guestMode:!isGuest, firearmsId:'', guestMake:'', guestModel:'', guestCaliber:''})}
+            style={{fontFamily:"'Oswald',sans-serif",fontSize:9,letterSpacing:2,textTransform:'uppercase',background:'transparent',border:`1px solid ${G.border}`,color:G.muted,padding:'3px 8px',borderRadius:1,cursor:'pointer'}}>
+            {isGuest ? 'Use Owned' : 'Guest Gun'}
+          </button>
+          <button style={btnD} onClick={onRemove}>✕</button>
+        </div>
       </div>
 
-      <div style={fr}>
-        <div style={fc}>
-          <label style={lbl}>Firearm</label>
-          <select style={sel} value={entry.firearmsId} onChange={e => upd({firearmsId:e.target.value})}>
-            <option value="">-- Select --</option>
-            {firearms.map(f => <option key={f.id} value={f.id}>{f.make} {f.model} ({f.caliber})</option>)}
-          </select>
+      {/* ── Owned firearm selector ── */}
+      {!isGuest && (
+        <div>
+          <div style={fr}>
+            <div style={fc}>
+              <label style={lbl}>Firearm</label>
+              <select style={sel} value={entry.firearmsId} onChange={e => upd({firearmsId:e.target.value})}>
+                <option value="">-- Select --</option>
+                {firearms.map(f => <option key={f.id} value={f.id}>{f.make} {f.model} ({f.caliber})</option>)}
+              </select>
+            </div>
+            <div style={fc}>
+              <label style={lbl}>Total Rounds Fired</label>
+              <input style={inp} type="number" min="0" value={entry.rounds} onChange={e => upd({rounds:parseInt(e.target.value)||0})}/>
+            </div>
+          </div>
+          {/* Guest rounds toggle */}
+          <div style={{marginBottom:9}}>
+            <div
+              onClick={() => upd({showGuestRounds:!entry.showGuestRounds, guestRounds:entry.showGuestRounds?0:(entry.guestRounds||0)})}
+              style={{display:'inline-flex',alignItems:'center',gap:7,cursor:'pointer',userSelect:'none',WebkitUserSelect:'none'}}>
+              <div style={{width:30,height:16,borderRadius:8,background:entry.showGuestRounds?G.accentD:G.border,transition:'background 0.2s',position:'relative',flexShrink:0}}>
+                <div style={{position:'absolute',top:2,left:entry.showGuestRounds?14:2,width:12,height:12,borderRadius:'50%',background:G.text,transition:'left 0.2s'}}/>
+              </div>
+              <span style={{fontSize:11,color:entry.showGuestRounds?G.accent:G.muted,letterSpacing:1}}>Others fired this gun</span>
+            </div>
+            {entry.showGuestRounds && (
+              <div style={{marginTop:8,background:`${G.accentD}10`,border:`1px solid ${G.accentD}33`,borderRadius:1,padding:'10px 12px'}}>
+                <div style={fr}>
+                  <div style={{...fc,marginBottom:0}}>
+                    <label style={{...lbl,color:G.accentD}}>Rounds fired by others</label>
+                    <input style={inp} type="number" min="0" max={entry.rounds||0}
+                      value={entry.guestRounds||0}
+                      onChange={e => upd({guestRounds:Math.min(parseInt(e.target.value)||0, entry.rounds||0)})}/>
+                  </div>
+                  <div style={{...fc,marginBottom:0}}>
+                    <label style={{...lbl,color:G.muted}}>Your rounds</label>
+                    <div style={{...inp,color:G.accent,fontFamily:"'Share Tech Mono',monospace",display:'flex',alignItems:'center',background:`${G.bg}88`,cursor:'default'}}>
+                      {Math.max(0,(entry.rounds||0)-(entry.guestRounds||0))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:G.accentD,fontStyle:'italic',marginTop:4}}>
+                  Only your {Math.max(0,(entry.rounds||0)-(entry.guestRounds||0))} rounds count toward your personal stats. All {entry.rounds||0} count toward this firearm's total.
+                </div>
+              </div>
+            )}
+          </div>
         </div>
-        <div style={fc}>
-          <label style={lbl}>Rounds Fired</label>
-          <input style={inp} type="number" min="0" value={entry.rounds} onChange={e => upd({rounds:parseInt(e.target.value)||0})}/>
+      )}
+
+      {/* ── Guest firearm fields ── */}
+      {isGuest && (
+        <div>
+          <div style={fr}>
+            <div style={fc}>
+              <label style={lbl}>Make</label>
+              <input style={inp} type="text" placeholder="e.g. HK, Beretta..." value={entry.guestMake||''} onChange={e => upd({guestMake:e.target.value})}/>
+            </div>
+            <div style={fc}>
+              <label style={lbl}>Model</label>
+              <input style={inp} type="text" placeholder="e.g. VP9, M9A3..." value={entry.guestModel||''} onChange={e => upd({guestModel:e.target.value})}/>
+            </div>
+          </div>
+          <div style={fr}>
+            <div style={fc}>
+              <label style={lbl}>Caliber</label>
+              <input style={inp} type="text" placeholder="e.g. 9mm, .40 S&W..." value={entry.guestCaliber||''} onChange={e => upd({guestCaliber:e.target.value})}/>
+            </div>
+            <div style={fc}>
+              <label style={lbl}>Rounds Fired</label>
+              <input style={inp} type="number" min="0" value={entry.rounds} onChange={e => upd({rounds:parseInt(e.target.value)||0})}/>
+            </div>
+          </div>
+          <div style={{fontSize:11,color:G.accentD,fontStyle:'italic',marginBottom:9,paddingBottom:9,borderBottom:`1px solid ${G.border}`}}>
+            Rounds count toward your totals but this firearm won't be added to your armory.
+          </div>
         </div>
-      </div>
+      )}
 
       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr',gap:8,marginBottom:9}}>
         <div style={fc}>
@@ -643,8 +721,14 @@ function App() {
   useEffect(() => { if(loaded) S.set('sessions',sessions); }, [sessions,loaded]);
 
   // ── Computed ──
-  const lifeRds = useMemo(() => sessions.reduce((s,se) => s+se.gunEntries.reduce((a,g)=>a+(parseInt(g.rounds)||0),0),0), [sessions]);
-  const yrRds = useMemo(() => { const y=String(curYear()); return sessions.filter(s=>s.date?.startsWith(y)).reduce((s,se)=>s+se.gunEntries.reduce((a,g)=>a+(parseInt(g.rounds)||0),0),0); }, [sessions]);
+  const lifeRds = useMemo(() => sessions.reduce((s,se) => s + se.gunEntries.reduce((a,g) => {
+    if(g.guestMode) return a; // guest gun — still counts (it's your stat, your experience)
+    return a + Math.max(0,(parseInt(g.rounds)||0)-(parseInt(g.guestRounds)||0));
+  }, 0), 0), [sessions]);
+  const yrRds = useMemo(() => { const y=String(curYear()); return sessions.filter(s=>s.date?.startsWith(y)).reduce((s,se)=>s+se.gunEntries.reduce((a,g)=>{
+    if(g.guestMode) return a;
+    return a + Math.max(0,(parseInt(g.rounds)||0)-(parseInt(g.guestRounds)||0));
+  },0),0); }, [sessions]);
   const yrSess = useMemo(() => sessions.filter(s=>s.date?.startsWith(String(curYear()))).length, [sessions]);
 
   const rdsByFA = useMemo(() => { const m={}; sessions.forEach(se=>se.gunEntries.forEach(g=>{ if(!g.firearmsId)return; m[g.firearmsId]=(m[g.firearmsId]||0)+(parseInt(g.rounds)||0); })); return m; }, [sessions]);
@@ -929,7 +1013,11 @@ function App() {
                       {s.location && <span style={{fontSize:12,color:G.muted,marginLeft:4}}>— {s.location}</span>}
                     </div>
                     <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.dim,marginTop:2}}>
-                      {s.gunEntries.filter(g=>g.firearmsId).map(g=>{const fa=firearms.find(f=>f.id===g.firearmsId);return fa?`${fa.make} ${fa.model} (${g.rounds}rds)`:''}).filter(Boolean).join(' · ')||'No firearms logged'}
+                      {s.gunEntries.filter(g=>g.firearmsId||g.guestMode).map(g=>{
+                        if(g.guestMode) return [g.guestMake,g.guestModel].filter(Boolean).join(' ')+` (${g.rounds}rds)`;
+                        const fa=firearms.find(f=>f.id===g.firearmsId);
+                        return fa?`${fa.make} ${fa.model} (${g.rounds}rds)`:'';
+                      }).filter(Boolean).join(' · ')||'No firearms logged'}
                     </div>
                   </div>
                   <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,background:`${G.accent}15`,border:`1px solid ${G.accent}30`,color:G.accent,padding:'2px 7px',borderRadius:1}}>{tRds} rds</span>
@@ -950,14 +1038,36 @@ function App() {
                       </a>
                     )}
                     {s.gunEntries.map((g,i) => {
-                      const fa = firearms.find(f=>f.id===g.firearmsId);
+                      const fa = !g.guestMode && firearms.find(f=>f.id===g.firearmsId);
+                      const isGuest = g.guestMode === true;
+                      const gunLabel = isGuest
+                        ? [g.guestMake, g.guestModel].filter(Boolean).join(' ') || 'Guest Firearm'
+                        : fa ? `${fa.make} ${fa.model}` : '—';
                       const mc = (g.malfunctionLog||[]).length+(g.malfunctions||0);
                       return (
-                        <div key={i} style={{background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,padding:10,marginBottom:7}}>
+                        <div key={i} style={{background:G.bg,border:`1px solid ${isGuest?G.accentD+'55':G.border}`,borderStyle:isGuest?'dashed':'solid',borderRadius:1,padding:10,marginBottom:7}}>
                           <div style={{display:'flex',justifyContent:'space-between',marginBottom:5}}>
-                            <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,letterSpacing:1,color:G.text}}>{fa?`${fa.make} ${fa.model}`:'—'}</span>
-                            <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,background:`${G.accent}15`,border:`1px solid ${G.accent}30`,color:G.accent,padding:'2px 7px',borderRadius:1}}>{g.rounds} rds</span>
+                            <div style={{display:'flex',alignItems:'center',gap:7}}>
+                              <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,letterSpacing:1,color:isGuest?G.accentD:G.text}}>{gunLabel}</span>
+                              {isGuest && <span style={{fontFamily:"'Oswald',sans-serif",fontSize:9,letterSpacing:2,textTransform:'uppercase',color:G.accentD,background:`${G.accentD}22`,border:`1px solid ${G.accentD}44`,padding:'2px 5px',borderRadius:1}}>GUEST</span>}
+                              {isGuest && g.guestCaliber && <span style={{fontSize:11,color:G.muted}}>{g.guestCaliber}</span>}
+                            </div>
+                            <div style={{display:'flex',alignItems:'center',gap:6}}>
+                              {!isGuest && (g.guestRounds||0)>0 && (
+                                <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.accentD,background:`${G.accentD}15`,border:`1px solid ${G.accentD}33`,padding:'2px 7px',borderRadius:1}}>
+                                  {Math.max(0,(g.rounds||0)-(g.guestRounds||0))} yours
+                                </span>
+                              )}
+                              <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,background:`${G.accent}15`,border:`1px solid ${G.accent}30`,color:G.accent,padding:'2px 7px',borderRadius:1}}>
+                                {g.rounds} rds{(!isGuest&&(g.guestRounds||0)>0)?` total`:''}
+                              </span>
+                            </div>
                           </div>
+                          {!isGuest && (g.guestRounds||0)>0 && (
+                            <div style={{fontSize:11,color:G.accentD,marginBottom:5}}>
+                              {g.guestRounds} round{g.guestRounds!==1?'s':''} fired by others — {Math.max(0,(g.rounds||0)-(g.guestRounds||0))} count toward your stats
+                            </div>
+                          )}
                           {g.ammoLoad && <div style={{fontSize:12,color:G.muted,marginBottom:3}}>Ammo: {g.ammoLoad}</div>}
                           {g.distance && <div style={{fontSize:12,color:G.muted,marginBottom:3}}>Distance: {g.distance} yds</div>}
                           {g.suppressorId && (()=>{ const sp=suppressors.find(s=>s.id===g.suppressorId); return sp?<div style={{fontSize:12,color:G.green,marginBottom:3}}>🔇 Suppressor: {sp.make} {sp.model}{g.suppressedRounds!=null && g.suppressedRounds!==g.rounds ? ` · ${g.suppressedRounds} rds suppressed` : ' · all rounds suppressed'}</div>:null; })()}
