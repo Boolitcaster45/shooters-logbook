@@ -102,6 +102,69 @@ const fc = {display:'flex',flexDirection:'column',marginBottom:10};
 const fr = {display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:9};
 const barWrap = {height:4,background:G.border,borderRadius:2,marginTop:5,overflow:'hidden'};
 
+// ── USNG Coordinate Conversion ────────────────────────────────────────────────
+// Converts WGS84 lat/lng to US National Grid (USNG) string
+// Full implementation: lat/lng → UTM → MGRS/USNG
+function toUSNG(lat, lng, precision=5) {
+  // Clamp to valid range
+  if (lat < -80 || lat > 84) return `${lat.toFixed(4)}°N ${Math.abs(lng).toFixed(4)}°${lng>=0?'E':'W'}`;
+
+  const DEG = Math.PI / 180;
+  const a = 6378137.0, f = 1/298.257223563;
+  const b = a*(1-f), e2 = 1-(b*b)/(a*a), e = Math.sqrt(e2);
+  const k0 = 0.9996;
+
+  // UTM zone
+  let zone = Math.floor((lng + 180) / 6) + 1;
+  // Special zones for Norway/Svalbard (won't apply in US but keeps it correct)
+  const latRad = lat * DEG, lngRad = lng * DEG;
+  const cm = ((zone - 1) * 6 - 180 + 3) * DEG; // central meridian
+
+  const N = a / Math.sqrt(1 - e2*Math.sin(latRad)**2);
+  const T = Math.tan(latRad)**2;
+  const C = (e2/(1-e2)) * Math.cos(latRad)**2;
+  const A = Math.cos(latRad) * (lngRad - cm);
+  const e1 = (1 - Math.sqrt(1-e2)) / (1 + Math.sqrt(1-e2));
+  const M = a*(
+    (1 - e2/4 - 3*e2*e2/64 - 5*e2*e2*e2/256)*latRad
+    - (3*e2/8 + 3*e2*e2/32 + 45*e2*e2*e2/1024)*Math.sin(2*latRad)
+    + (15*e2*e2/256 + 45*e2*e2*e2/1024)*Math.sin(4*latRad)
+    - (35*e2*e2*e2/3072)*Math.sin(6*latRad)
+  );
+
+  let easting = k0*N*(A + (1-T+C)*A**3/6 + (5-18*T+T**2+72*C-58*(e2/(1-e2)))*A**5/120) + 500000;
+  let northing = k0*(M + N*Math.tan(latRad)*(A**2/2 + (5-T+9*C+4*C**2)*A**4/24 + (61-58*T+T**2+600*C-330*(e2/(1-e2)))*A**6/720));
+  if (lat < 0) northing += 10000000;
+
+  // UTM latitude band letter
+  const bands = 'CDEFGHJKLMNPQRSTUVWX';
+  const bandIdx = Math.floor((lat + 80) / 8);
+  const latBand = bands[Math.min(bandIdx, 19)];
+
+  // MGRS 100km grid square letters
+  const setNum = ((zone - 1) % 6) + 1;
+  const colLetters  = ['','ABCDEFGH','JKLMNPQR','STUVWXYZ','ABCDEFGH','JKLMNPQR','STUVWXYZ'];
+  const rowLettersA = 'ABCDEFGHJKLMNPQRSTUV';
+  const rowLettersB = 'FGHJKLMNPQRSTUVABCDE';
+
+  const col = Math.floor(easting / 100000);
+  const row = Math.floor(northing / 100000) % 20;
+
+  const colLetter = colLetters[setNum][col - 1] || '?';
+  const rowLetter = (setNum % 2 === 1 ? rowLettersA : rowLettersB)[row] || '?';
+
+  // Numeric part — easting and northing within 100km square
+  const e100 = Math.floor(easting % 100000);
+  const n100 = Math.floor(northing % 100000);
+
+  // Format to requested precision (digits per axis: 1=10km, 2=1km, 3=100m, 4=10m, 5=1m)
+  const divisor = Math.pow(10, 5 - precision);
+  const eStr = String(Math.floor(e100 / divisor)).padStart(precision, '0');
+  const nStr = String(Math.floor(n100 / divisor)).padStart(precision, '0');
+
+  return `${zone}${latBand} ${colLetter}${rowLetter} ${eStr} ${nStr}`;
+}
+
 // ── GunEntryForm ───────────────────────────────────────────────────────────────
 function GunEntryForm({firearms, suppressors, entry, onChange, onRemove}) {
   const fa = firearms.find(f => f.id === entry.firearmsId);
@@ -267,7 +330,37 @@ function SessionModal({firearms, suppressors, existing, onSave, onClose}) {
 
   const tog = (arr, set, v) => set(arr.includes(v) ? arr.filter(x=>x!==v) : [...arr,v]);
   const totalRds = guns.reduce((s,e) => s+(parseInt(e.rounds)||0), 0);
-  const save = () => { onSave({id:existing?.id||uid(),date,location:loc,weather:wx,notes,gunEntries:guns}); onClose(); };
+  const [gpsState, setGpsState] = useState(existing?.gpsCoords ? 'done' : 'idle');
+  const [gpsCoords, setGpsCoords] = useState(existing?.gpsCoords || null);
+  const save = () => { onSave({id:existing?.id||uid(),date,location:loc,weather:wx,notes,gunEntries:guns,gpsCoords}); onClose(); };
+
+  const getGPS = () => {
+    if (!navigator.geolocation) { setGpsState('error'); return; }
+    setGpsState('loading');
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        const {latitude, longitude} = pos.coords;
+        setGpsCoords({lat: latitude, lng: longitude});
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`, {headers:{'Accept-Language':'en'}});
+          const data = await res.json();
+          const addr = data.address || {};
+          // Build a sensible range-context location string
+          const parts = [addr.hamlet||addr.village||addr.town||addr.city||addr.county, addr.state].filter(Boolean);
+          if (!loc) setLoc(parts.join(', '));
+          setGpsState('done');
+        } catch {
+          setGpsCoords({lat: latitude, lng: longitude});
+          setGpsState('done');
+        }
+      },
+      err => {
+        console.warn('GPS error', err);
+        setGpsState('error');
+      },
+      {enableHighAccuracy: true, timeout: 10000}
+    );
+  };
 
   const modalStyle = {
     background:G.surface, borderTop:`2px solid ${G.accent}`, border:`1px solid ${G.border}`,
@@ -284,7 +377,35 @@ function SessionModal({firearms, suppressors, existing, onSave, onClose}) {
 
         <div style={fr}>
           <div style={fc}><label style={lbl}>Date</label><input style={inp} type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
-          <div style={fc}><label style={lbl}>Location / Range</label><input style={inp} type="text" placeholder="Range name..." value={loc} onChange={e=>setLoc(e.target.value)}/></div>
+          <div style={fc}>
+            <label style={lbl}>Location / Range</label>
+            <div style={{display:'flex',gap:6}}>
+              <input style={{...inp,flex:1,minWidth:0}} type="text" placeholder="Range name..." value={loc} onChange={e=>setLoc(e.target.value)}/>
+              <button
+                onClick={getGPS}
+                disabled={gpsState==='loading'}
+                title={gpsState==='error'?'Location unavailable — check browser permissions':'Use current GPS location'}
+                style={{
+                  ...btnG, padding:'0 11px', flexShrink:0, fontSize:16, lineHeight:1,
+                  color: gpsState==='done' ? G.green : gpsState==='error' ? G.danger : G.muted,
+                  borderColor: gpsState==='done' ? `${G.green}55` : gpsState==='error' ? `${G.danger}55` : G.border,
+                  opacity: gpsState==='loading' ? 0.5 : 1,
+                  cursor: gpsState==='loading' ? 'wait' : 'pointer',
+                }}>
+                {gpsState==='loading' ? '⟳' : gpsState==='done' ? '📍' : gpsState==='error' ? '⚠' : '📍'}
+              </button>
+            </div>
+            {gpsState==='done' && gpsCoords && (
+              <div style={{fontSize:10,color:G.green,fontFamily:"'Share Tech Mono',monospace",marginTop:4,letterSpacing:1}}>
+                📍 {toUSNG(gpsCoords.lat, gpsCoords.lng)}
+              </div>
+            )}
+            {gpsState==='error' && (
+              <div style={{fontSize:10,color:G.danger,marginTop:4}}>
+                Location access denied or unavailable. Check browser permissions.
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{...fc,marginTop:4}}>
@@ -771,7 +892,7 @@ function App() {
                 <span style={{fontFamily:"'Oswald',sans-serif",fontSize:13,color:G.text}}>{a.f.make} {a.f.model}</span>
                 <span style={{fontSize:12,color:G.muted,marginLeft:5}}>— {a.task}</span>
               </div>
-              <button style={{...btnG,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>{markSvc(a.fId,a.pId);setTab('firearms');setArmsSub('firearms');}}>Done</button>
+              <button style={{...btnG,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>{markSvc(a.fId,a.pId);setTab('firearms');setArmsSub('firearms');}}>↺ Serviced</button>
             </div>
           ))}
           {suppDueAlerts.map((a,i) => (
@@ -781,7 +902,7 @@ function App() {
                 <span style={{fontSize:10,color:G.green,marginLeft:5,fontFamily:"'Share Tech Mono',monospace"}}>SUPP</span>
                 <span style={{fontSize:12,color:G.muted,marginLeft:5}}>— {a.task}</span>
               </div>
-              <button style={{...btnG,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>{markSuppSvc(a.sId,a.pId);setTab('firearms');setArmsSub('suppressors');}}>Done</button>
+              <button style={{...btnG,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>{markSuppSvc(a.sId,a.pId);setTab('firearms');setArmsSub('suppressors');}}>↺ Serviced</button>
             </div>
           ))}
         </div>
@@ -819,6 +940,14 @@ function App() {
                       <div style={{display:'flex',gap:5,flexWrap:'wrap',marginBottom:9}}>
                         {s.weather.map(w=><span key={w} style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,background:G.surface,border:`1px solid ${G.border}`,padding:'2px 6px',borderRadius:1}}>🌤 {w}</span>)}
                       </div>
+                    )}
+                    {s.gpsCoords && (
+                      <a
+                        href={`https://maps.apple.com/?ll=${s.gpsCoords.lat},${s.gpsCoords.lng}&q=Range`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{display:'inline-flex',alignItems:'center',gap:5,fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.green,textDecoration:'none',marginBottom:9,padding:'3px 8px',background:`${G.green}10`,border:`1px solid ${G.green}30`,borderRadius:1,letterSpacing:1}}>
+                        📍 {toUSNG(s.gpsCoords.lat, s.gpsCoords.lng)} — open in Maps
+                      </a>
                     )}
                     {s.gunEntries.map((g,i) => {
                       const fa = firearms.find(f=>f.id===g.firearmsId);
@@ -1012,7 +1141,11 @@ function App() {
                                 <div key={p.id} style={{background:G.bg,border:`1px solid ${isDue?G.danger+'55':G.border}`,borderLeft:`3px solid ${bc}`,borderRadius:1,padding:'9px 11px',marginBottom:7}}>
                                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:5}}>
                                     <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:G.text,marginBottom:2}}>{p.task}</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted}}>Every {interval.toLocaleString()} rds · {since.toLocaleString()} since service</div></div>
-                                    {isDue ? <button style={{...btnP,...btnSm,flexShrink:0,marginLeft:9}} onClick={()=>markSvc(f.id,p.id)}>Mark Serviced</button> : <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,marginLeft:9,flexShrink:0}}>{left.toLocaleString()} rds left</span>}
+                                    <div style={{display:'flex',gap:5,flexShrink:0,marginLeft:9}}>
+                                      {!isDue && <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,alignSelf:'center'}}>{left.toLocaleString()} rds left</span>}
+                                      {isDue && <button style={{...btnP,...btnSm}} onClick={()=>markSvc(f.id,p.id)}>Mark Serviced</button>}
+                                      <button style={{...btnG,...btnSm,fontSize:10,padding:'5px 9px',color:G.muted}} title="Reset interval from current round count" onClick={()=>markSvc(f.id,p.id)}>↺ Reset</button>
+                                    </div>
                                   </div>
                                   <div style={barWrap}><div style={{height:'100%',width:`${pct}%`,background:bc,borderRadius:2,transition:'width 0.4s ease'}}/></div>
                                   {isDue && <div style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginTop:4}}>⚙ SERVICE DUE</div>}
@@ -1092,7 +1225,11 @@ function App() {
                                 <div key={p.id} style={{background:G.bg,border:`1px solid ${isDue?G.danger+'55':G.border}`,borderLeft:`3px solid ${bc}`,borderRadius:1,padding:'9px 11px',marginBottom:7}}>
                                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:5}}>
                                     <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,color:G.text,marginBottom:2}}>{p.task}</div><div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted}}>Every {interval.toLocaleString()} rds · {since.toLocaleString()} since service</div></div>
-                                    {isDue ? <button style={{...btnP,...btnSm,background:G.green,flexShrink:0,marginLeft:9}} onClick={()=>markSuppSvc(s.id,p.id)}>Mark Serviced</button> : <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,marginLeft:9,flexShrink:0}}>{left.toLocaleString()} rds left</span>}
+                                    <div style={{display:'flex',gap:5,flexShrink:0,marginLeft:9}}>
+                                      {!isDue && <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,alignSelf:'center'}}>{left.toLocaleString()} rds left</span>}
+                                      {isDue && <button style={{...btnP,...btnSm,background:G.green}} onClick={()=>markSuppSvc(s.id,p.id)}>Mark Serviced</button>}
+                                      <button style={{...btnG,...btnSm,fontSize:10,padding:'5px 9px',color:G.muted}} title="Reset interval from current round count" onClick={()=>markSuppSvc(s.id,p.id)}>↺ Reset</button>
+                                    </div>
                                   </div>
                                   <div style={barWrap}><div style={{height:'100%',width:`${pct}%`,background:bc,borderRadius:2,transition:'width 0.4s ease'}}/></div>
                                   {isDue && <div style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginTop:4}}>⚙ SERVICE DUE</div>}
