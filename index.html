@@ -691,12 +691,153 @@ function SuppressorModal({existing, onSave, onClose}) {
   );
 }
 
+// ── LoadModal ──────────────────────────────────────────────────────────────────
+const LOAD_FIELDS = ['loadName','date','gun','caliber','primerBrand','primerType','powderType','powderCharge','bulletWeight','bulletType','oal','velocity','notes'];
+const SAAMI_STATIC = {
+  '.45 acp':{oalMin:1.195,oalMax:1.275,velMax:1050},'.45 auto':{oalMin:1.195,oalMax:1.275,velMax:1050},
+  '9mm':{oalMin:1.069,oalMax:1.169,velMax:1500},'9x19':{oalMin:1.069,oalMax:1.169,velMax:1500},
+  '9mm luger':{oalMin:1.069,oalMax:1.169,velMax:1500},'.38 special':{oalMin:1.425,oalMax:1.550,velMax:1000},
+  '.357 magnum':{oalMin:1.560,oalMax:1.590,velMax:1800},'.40 s&w':{oalMin:1.125,oalMax:1.135,velMax:1400},
+  '.44 magnum':{oalMin:1.610,oalMax:1.610,velMax:1900},'.44 special':{oalMin:1.400,oalMax:1.615,velMax:1000},
+  '.308 win':{oalMin:2.800,oalMax:2.810,velMax:3200},'.30-06':{oalMin:3.290,oalMax:3.340,velMax:3200},
+  '5.56 nato':{oalMin:2.230,oalMax:2.260,velMax:3300},'.223 rem':{oalMin:2.200,oalMax:2.260,velMax:3300},
+  '.30 carbine':{oalMin:1.650,oalMax:1.680,velMax:2100},'10mm auto':{oalMin:1.240,oalMax:1.260,velMax:1800},
+  '.380 acp':{oalMin:0.980,oalMax:0.984,velMax:1100},
+};
+function calcWarnings(ld) {
+  const ref=SAAMI_STATIC[(ld.caliber||'').toLowerCase().trim()]; if(!ref)return[];
+  const w=[],oal=parseFloat(ld.oal),vel=parseFloat(ld.velocity);
+  if(!isNaN(oal)){if(oal<ref.oalMin)w.push(`OAL ${oal}" below SAAMI min (${ref.oalMin}")`);if(oal>ref.oalMax)w.push(`OAL ${oal}" exceeds SAAMI max (${ref.oalMax}")`)}
+  if(!isNaN(vel)&&vel>ref.velMax)w.push(`Velocity ${vel} fps exceeds SAAMI ref max (${ref.velMax} fps)`);
+  return w;
+}
+
+function LoadModal({mode, existing, onSave, onDuplicate, onClose}) {
+  const isView = mode==='view';
+  const [form, setForm] = useState(() => {
+    if(existing) return {...existing};
+    return {loadName:'',date:todayStr(),gun:'',caliber:'',primerBrand:'',primerType:'',powderType:'',powderCharge:'',bulletWeight:'',bulletType:'',oal:'',velocity:'',notes:''};
+  });
+  const warnings = calcWarnings(form);
+  const upd = ch => setForm(f=>({...f,...ch}));
+  const save = () => { if(!form.loadName) return; onSave({...form,id:existing?.id||uid()}); onClose(); };
+
+  const modalStyle = {background:G.surface,borderTop:`2px solid ${G.accent}`,border:`1px solid ${G.border}`,width:'100%',maxWidth:640,maxHeight:'92dvh',overflowY:'auto',borderRadius:'8px 8px 0 0',padding:'18px 15px 30px'};
+
+  const FieldRow = ({label, field, type='text', placeholder='', half=false}) => (
+    <div style={{...fc, marginBottom:0}}>
+      <label style={lbl}>{label}</label>
+      <input style={inp} type={type} placeholder={placeholder} value={form[field]||''}
+        onChange={e=>upd({[field]:e.target.value})}/>
+    </div>
+  );
+
+  return (
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',zIndex:200,display:'flex',alignItems:'flex-end',justifyContent:'center'}}>
+      <div style={modalStyle}>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,letterSpacing:3,textTransform:'uppercase',color:G.accent,marginBottom:16,paddingBottom:10,borderBottom:`1px solid ${G.border}`,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <span>{isView ? (existing?.loadName||'Load Detail') : (mode==='add'?'New Load':'Edit Load')}</span>
+          {isView && <button style={{...btnG,...btnSm,fontSize:11}} onClick={onClose}>Close</button>}
+        </div>
+
+        {/* SAAMI warnings */}
+        {warnings.length>0 && (
+          <div style={{background:`${G.danger}10`,border:`1px solid ${G.danger}44`,borderLeft:`3px solid ${G.danger}`,borderRadius:1,padding:'10px 12px',marginBottom:14}}>
+            <div style={{fontSize:10,letterSpacing:2,color:G.danger,textTransform:'uppercase',marginBottom:6}}>⚠ SAAMI Reference Warnings</div>
+            {warnings.map((w,i)=><div key={i} style={{fontSize:12,color:G.danger,marginBottom:2}}>· {w}</div>)}
+          </div>
+        )}
+
+        {isView ? (
+          // ── Detail view ──
+          <div>
+            {[
+              ['Firearm',existing?.gun],['Caliber',existing?.caliber],
+              ['Primer Brand',existing?.primerBrand],['Primer Type',existing?.primerType],
+              ['Powder',existing?.powderType],['Charge',existing?.powderCharge?existing.powderCharge+' gr':''],
+              ['Bullet Weight',existing?.bulletWeight?existing.bulletWeight+' gr':''],
+              ['Bullet Type',existing?.bulletType],
+              ['OAL',existing?.oal?existing.oal+'"':''],
+              ['Velocity',existing?.velocity?existing.velocity+' fps':''],
+              ['Date',existing?.date],
+            ].filter(([,v])=>v).map(([k,v])=>(
+              <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',padding:'8px 0',borderBottom:`1px solid ${G.border}`}}>
+                <span style={{fontSize:10,letterSpacing:2,color:G.muted,textTransform:'uppercase'}}>{k}</span>
+                <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:G.text,textAlign:'right'}}>{v}</span>
+              </div>
+            ))}
+            {existing?.notes && (
+              <div style={{marginTop:10,padding:10,background:G.bg,border:`1px solid ${G.border}`,borderRadius:1,fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:G.muted,lineHeight:1.7,whiteSpace:'pre-wrap'}}>
+                {existing.notes}
+              </div>
+            )}
+            <div style={{display:'flex',gap:9,marginTop:16,paddingTop:13,borderTop:`1px solid ${G.border}`}}>
+              <button style={btnG} onClick={onClose}>Close</button>
+              <button style={btnG} onClick={()=>{onDuplicate(existing.id);onClose();}}>Duplicate</button>
+              <button style={{...btnP,marginLeft:'auto'}} onClick={()=>{/* parent will switch mode */onClose();}}>Edit Load</button>
+            </div>
+          </div>
+        ) : (
+          // ── Form ──
+          <div>
+            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',marginBottom:10,paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Load Identity</div>
+            <div style={fr}>
+              <FieldRow label="Load Name *" field="loadName" placeholder="e.g. 45 ACP 230gr Standard"/>
+              <FieldRow label="Date" field="date" type="date"/>
+            </div>
+            <div style={fr}>
+              <FieldRow label="Firearm" field="gun" placeholder="e.g. 1911 Government"/>
+              <FieldRow label="Caliber" field="caliber" placeholder="e.g. .45 ACP"/>
+            </div>
+
+            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Primer</div>
+            <div style={fr}>
+              <FieldRow label="Brand" field="primerBrand" placeholder="e.g. CCI, Federal"/>
+              <FieldRow label="Type" field="primerType" placeholder="e.g. Large Pistol"/>
+            </div>
+
+            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Powder</div>
+            <div style={fr}>
+              <FieldRow label="Powder" field="powderType" placeholder="e.g. Hodgdon Titegroup"/>
+              <FieldRow label="Charge (gr)" field="powderCharge" type="number" placeholder="e.g. 4.2"/>
+            </div>
+
+            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Projectile</div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:9,marginBottom:9}}>
+              <div style={{...fc,marginBottom:0}}><label style={lbl}>Weight (gr)</label><input style={inp} type="number" placeholder="e.g. 230" value={form.bulletWeight||''} onChange={e=>upd({bulletWeight:e.target.value})}/></div>
+              <div style={{...fc,marginBottom:0}}><label style={lbl}>Type / Style</label><input style={inp} type="text" placeholder="e.g. 230gr RN Cast" value={form.bulletType||''} onChange={e=>upd({bulletType:e.target.value})}/></div>
+              <div style={{...fc,marginBottom:0}}><label style={lbl}>OAL (in)</label><input style={inp} type="number" placeholder='e.g. 1.275' value={form.oal||''} onChange={e=>upd({oal:e.target.value})}/></div>
+            </div>
+
+            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Performance</div>
+            <div style={fr}>
+              <div style={{...fc,marginBottom:0}}><label style={lbl}>Velocity (fps)</label><input style={inp} type="number" placeholder="e.g. 830" value={form.velocity||''} onChange={e=>upd({velocity:e.target.value})}/></div>
+              <div style={{...fc,marginBottom:0}}/>
+            </div>
+
+            <div style={{fontSize:10,letterSpacing:3,color:G.accent,textTransform:'uppercase',margin:'14px 0 10px',paddingBottom:6,borderBottom:`1px solid ${G.border}`}}>Notes</div>
+            <div style={{...fc,marginBottom:14}}>
+              <textarea style={{...inp,resize:'vertical',minHeight:65,fontSize:14}} placeholder="Observations, accuracy, reliability, recoil..." value={form.notes||''} onChange={e=>upd({notes:e.target.value})}/>
+            </div>
+
+            <div style={{display:'flex',gap:9,justifyContent:'flex-end',paddingTop:13,borderTop:`1px solid ${G.border}`}}>
+              <button style={btnG} onClick={onClose}>Cancel</button>
+              <button style={btnP} onClick={save}>{mode==='add'?'Add Load':'Save Changes'}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main App ───────────────────────────────────────────────────────────────────
 function App() {
   const [tab, setTab] = useState('stats');
   const [firearms, setFA] = useState([]);
   const [suppressors, setSupp] = useState([]);
   const [sessions, setSE] = useState([]);
+  const [loads, setLoads] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [showSess, setShowSess] = useState(false);
   const [editSess, setEditSess] = useState(null);
@@ -714,11 +855,13 @@ function App() {
     setFA(S.get('firearms') ?? DEFAULT_FA);
     setSupp(S.get('suppressors') ?? DEFAULT_SUPP);
     setSE(S.get('sessions') ?? []);
+    setLoads(S.get('loads') ?? []);
     setLoaded(true);
   }, []);
   useEffect(() => { if(loaded) S.set('firearms',firearms); }, [firearms,loaded]);
   useEffect(() => { if(loaded) S.set('suppressors',suppressors); }, [suppressors,loaded]);
   useEffect(() => { if(loaded) S.set('sessions',sessions); }, [sessions,loaded]);
+  useEffect(() => { if(loaded) S.set('loads',loads); }, [loads,loaded]);
 
   // ── Computed ──
   const lifeRds = useMemo(() => sessions.reduce((s,se) => s + se.gunEntries.reduce((a,g) => {
@@ -874,7 +1017,7 @@ function App() {
 
   // ── Export / Import ──
   const exportJSON = () => {
-    const data = { exportedAt: new Date().toISOString(), version: 2, firearms, suppressors, sessions };
+    const data = { exportedAt: new Date().toISOString(), version: 2, firearms, suppressors, sessions, loads };
     const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -932,6 +1075,12 @@ function App() {
   };
 
   const [importMsg, setImportMsg] = useState(null);
+  const [loadSearch, setLoadSearch] = useState('');
+  const [loadSort, setLoadSort] = useState('date_desc');
+  const [loadCalFilter, setLoadCalFilter] = useState('ALL');
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [loadModalMode, setLoadModalMode] = useState('add'); // 'add'|'edit'|'view'
+  const [editingLoad, setEditingLoad] = useState(null);
   const handleImport = e => {
     const file = e.target.files[0];
     if(!file) return;
@@ -944,7 +1093,8 @@ function App() {
           setFA(data.firearms || []);
           setSupp(data.suppressors || []);
           setSE(data.sessions || []);
-          setImportMsg({ok:true,text:`Imported ${data.firearms?.length||0} firearms, ${data.suppressors?.length||0} suppressors, ${data.sessions?.length||0} sessions.`});
+          setLoads(data.loads || []);
+          setImportMsg({ok:true,text:`Imported ${data.firearms?.length||0} firearms, ${data.suppressors?.length||0} suppressors, ${data.sessions?.length||0} sessions, ${data.loads?.length||0} loads.`});
         }
       } catch { setImportMsg({ok:false,text:'Could not parse file. Make sure it is a valid logbook JSON export.'}); }
     };
@@ -952,7 +1102,53 @@ function App() {
     e.target.value = '';
   };
 
-  // ── Shared layout styles ──
+  // ── SAAMI reference data ──
+  const SAAMI = {
+    '.45 acp':{oalMin:1.195,oalMax:1.275,velMax:1050},'.45 auto':{oalMin:1.195,oalMax:1.275,velMax:1050},
+    '9mm':{oalMin:1.069,oalMax:1.169,velMax:1500},'9x19':{oalMin:1.069,oalMax:1.169,velMax:1500},
+    '9mm luger':{oalMin:1.069,oalMax:1.169,velMax:1500},'.38 special':{oalMin:1.425,oalMax:1.550,velMax:1000},
+    '.357 magnum':{oalMin:1.560,oalMax:1.590,velMax:1800},'.40 s&w':{oalMin:1.125,oalMax:1.135,velMax:1400},
+    '.44 magnum':{oalMin:1.610,oalMax:1.610,velMax:1900},'.44 special':{oalMin:1.400,oalMax:1.615,velMax:1000},
+    '.308 win':{oalMin:2.800,oalMax:2.810,velMax:3200},'.30-06':{oalMin:3.290,oalMax:3.340,velMax:3200},
+    '5.56 nato':{oalMin:2.230,oalMax:2.260,velMax:3300},'.223 rem':{oalMin:2.200,oalMax:2.260,velMax:3300},
+    '.30 carbine':{oalMin:1.650,oalMax:1.680,velMax:2100},'10mm auto':{oalMin:1.240,oalMax:1.260,velMax:1800},
+    '.380 acp':{oalMin:0.980,oalMax:0.984,velMax:1100},
+  };
+  const getLoadWarnings = ld => {
+    const ref = SAAMI[(ld.caliber||'').toLowerCase().trim()];
+    if(!ref) return [];
+    const w=[], oal=parseFloat(ld.oal), vel=parseFloat(ld.velocity);
+    if(!isNaN(oal)){if(oal<ref.oalMin)w.push(`OAL ${oal}" is BELOW SAAMI min (${ref.oalMin}")`);if(oal>ref.oalMax)w.push(`OAL ${oal}" exceeds SAAMI max (${ref.oalMax}")`)}
+    if(!isNaN(vel)&&vel>ref.velMax)w.push(`Velocity ${vel} fps exceeds SAAMI ref max (${ref.velMax} fps)`);
+    return w;
+  };
+
+  // ── Load handlers ──
+  const saveLoad = ld => setLoads(prev => { const i=prev.findIndex(x=>x.id===ld.id); if(i>=0){const n=[...prev];n[i]=ld;return n;} return[ld,...prev]; });
+  const deleteLoad = id => setLoads(prev => prev.filter(l=>l.id!==id));
+  const duplicateLoad = id => { const orig=loads.find(l=>l.id===id); if(!orig)return; setLoads(prev=>[{...orig,id:uid(),loadName:orig.loadName+' (Copy)',date:todayStr()},...prev]); };
+
+  const sortedLoads = useMemo(() => {
+    const q=loadSearch.toLowerCase();
+    const filtered=loads.filter(l=>{
+      const ms=!q||[l.loadName,l.gun,l.caliber,l.powderType,l.bulletType].some(v=>(v||'').toLowerCase().includes(q));
+      return ms&&(loadCalFilter==='ALL'||l.caliber===loadCalFilter);
+    });
+    const c=[...filtered];
+    switch(loadSort){
+      case 'date_asc':    return c.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+      case 'name_asc':    return c.sort((a,b)=>(a.loadName||'').localeCompare(b.loadName||''));
+      case 'name_desc':   return c.sort((a,b)=>(b.loadName||'').localeCompare(a.loadName||''));
+      case 'velocity_desc':return c.sort((a,b)=>parseFloat(b.velocity||0)-parseFloat(a.velocity||0));
+      case 'velocity_asc': return c.sort((a,b)=>parseFloat(a.velocity||0)-parseFloat(b.velocity||0));
+      case 'charge_desc': return c.sort((a,b)=>parseFloat(b.powderCharge||0)-parseFloat(a.powderCharge||0));
+      case 'charge_asc':  return c.sort((a,b)=>parseFloat(a.powderCharge||0)-parseFloat(b.powderCharge||0));
+      default: return c.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    }
+  }, [loads, loadSearch, loadSort, loadCalFilter]);
+
+  const loadCalibers = useMemo(() => ['ALL',...Array.from(new Set(loads.map(l=>l.caliber).filter(Boolean))).sort()], [loads]);
+  const loadWarnCount = useMemo(() => loads.filter(l=>getLoadWarnings(l).length>0).length, [loads]);
   const hdrStyle = {background:G.surface,borderBottom:`2px solid ${G.accent}`,padding:'14px 18px 12px',display:'flex',alignItems:'flex-end',gap:14,position:'sticky',top:0,zIndex:100};
   const navStyle = {display:'flex',borderBottom:`1px solid ${G.border}`,background:G.surface,position:'sticky',top:59,zIndex:99};
   const pgStyle = {padding:14};
@@ -987,7 +1183,7 @@ function App() {
 
       {/* ── Nav ── */}
       <div style={navStyle}>
-        {[['stats','Stats'],['log','Log'],['firearms','Arms']].map(([k,l]) => (
+        {[['stats','Stats'],['log','Log'],['firearms','Arms'],['loads','Loads']].map(([k,l]) => (
           <button key={k} onClick={()=>setTab(k)} style={{padding:'11px 0',fontFamily:"'Oswald',sans-serif",fontSize:12,letterSpacing:2,textTransform:'uppercase',color:tab===k?G.accent:G.muted,cursor:'pointer',border:'none',background:'none',borderBottom:`2px solid ${tab===k?G.accent:'transparent'}`,marginBottom:-1,flex:1,transition:'color 0.15s'}}>
             {l}
             {k==='firearms' && allDueAlerts>0 && (
@@ -1654,10 +1850,119 @@ function App() {
         </div>
       )}
 
+      {/* ════ LOADS ════ */}
+      {tab==='loads' && (
+        <div style={pgStyle}>
+          {/* Header row */}
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:13}}>
+            <div>
+              <div style={stStyle}>HANDLOAD DATA</div>
+              <div style={{display:'flex',gap:8,marginTop:-8}}>
+                <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted}}>{loads.length} load{loads.length!==1?'s':''}</span>
+                {loadWarnCount>0 && <span style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.danger}}>⚠ {loadWarnCount} SAAMI warning{loadWarnCount!==1?'s':''}</span>}
+              </div>
+            </div>
+            <button style={btnP} onClick={()=>{setLoadModalMode('add');setEditingLoad(null);setShowLoadModal(true);}}>+ New Load</button>
+          </div>
+
+          {/* Search + sort */}
+          <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+            <input
+              style={{...inp,flex:1,minWidth:160,fontSize:14,padding:'9px 12px'}}
+              placeholder="Search loads, caliber, powder…"
+              value={loadSearch} onChange={e=>setLoadSearch(e.target.value)}/>
+            <select style={{...inp,width:'auto',minWidth:160,cursor:'pointer',background:G.bg}} value={loadSort} onChange={e=>setLoadSort(e.target.value)}>
+              <option value="date_desc">Date ↓ (Newest)</option>
+              <option value="date_asc">Date ↑ (Oldest)</option>
+              <option value="name_asc">Name A→Z</option>
+              <option value="name_desc">Name Z→A</option>
+              <option value="velocity_desc">Velocity ↓</option>
+              <option value="velocity_asc">Velocity ↑</option>
+              <option value="charge_desc">Charge ↓</option>
+              <option value="charge_asc">Charge ↑</option>
+            </select>
+          </div>
+
+          {/* Caliber filter chips */}
+          {loadCalibers.length>1 && (
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:14}}>
+              {loadCalibers.map(c => (
+                <button key={c} onClick={()=>setLoadCalFilter(c)} style={{fontFamily:"'Oswald',sans-serif",fontSize:10,letterSpacing:2,textTransform:'uppercase',padding:'5px 11px',borderRadius:1,border:`1px solid ${loadCalFilter===c?G.accent:G.border}`,background:loadCalFilter===c?G.accent:'transparent',color:loadCalFilter===c?G.bg:G.muted,cursor:'pointer',transition:'all 0.15s'}}>
+                  {c}{c!=='ALL'?` (${loads.filter(l=>l.caliber===c).length})`:''}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Load cards */}
+          {sortedLoads.length===0 && (
+            <div style={{textAlign:'center',padding:'40px 20px',color:G.dim,fontFamily:"'Share Tech Mono',monospace",fontSize:11,letterSpacing:2,border:`1px dashed ${G.border}`,borderRadius:2}}>
+              {loadSearch||loadCalFilter!=='ALL'?'NO LOADS MATCH FILTERS':'NO LOADS YET — TAP "+ NEW LOAD"'}
+            </div>
+          )}
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:12}}>
+            {sortedLoads.map(ld => {
+              const warns = calcWarnings(ld);
+              const velWarn = warns.some(w=>w.includes('Velocity'));
+              return (
+                <div key={ld.id} style={{background:G.card,border:`1px solid ${warns.length>0?G.danger+'55':G.border}`,borderRadius:2,overflow:'hidden',cursor:'pointer'}}
+                  onClick={()=>{setEditingLoad(ld);setLoadModalMode('view');setShowLoadModal(true);}}>
+                  {/* Top accent bar */}
+                  <div style={{height:3,background:`linear-gradient(90deg,${warns.length>0?G.danger:G.accent},transparent)`}}/>
+                  {/* Card header */}
+                  <div style={{padding:'12px 13px 8px',display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8}}>
+                    <div style={{minWidth:0,flex:1}}>
+                      <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}>
+                        <span style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:700,letterSpacing:1,color:G.accent,textTransform:'uppercase'}}>{ld.loadName||'Unnamed Load'}</span>
+                        {warns.length>0 && <span style={{fontFamily:"'Oswald',sans-serif",fontSize:9,letterSpacing:1,color:G.bg,background:G.danger,padding:'2px 5px',borderRadius:1}}>WARN</span>}
+                      </div>
+                      <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,marginTop:2}}>{[ld.gun,ld.caliber].filter(Boolean).join(' · ')||'—'}</div>
+                    </div>
+                    <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.dim,flexShrink:0}}>{ld.date||''}</div>
+                  </div>
+                  {/* Stats row */}
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',borderTop:`1px solid ${G.border}`}}>
+                    {[['Charge',ld.powderCharge?ld.powderCharge+'gr':'—',false],['Bullet',ld.bulletWeight?ld.bulletWeight+'gr':'—',false],['Velocity',ld.velocity?ld.velocity+'fps':'—',velWarn]].map(([label,val,isWarn])=>(
+                      <div key={label} style={{padding:'9px 11px',borderRight:`1px solid ${G.border}`,'&:lastChild':{borderRight:'none'}}}>
+                        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:9,color:G.muted,letterSpacing:2,textTransform:'uppercase'}}>{label}</div>
+                        <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:isWarn?G.danger:G.text,marginTop:2,fontWeight:600}}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Footer */}
+                  <div style={{padding:'7px 13px',display:'flex',justifyContent:'space-between',alignItems:'center',borderTop:`1px solid ${G.border}`,background:G.surface,minHeight:38}} onClick={e=>e.stopPropagation()}>
+                    <div style={{fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:G.muted,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {[ld.powderType,ld.primerBrand].filter(Boolean).join(' / ')||'—'}
+                    </div>
+                    <div style={{display:'flex',gap:5,flexShrink:0}}>
+                      <button style={{...btnG,...btnSm,fontSize:10,padding:'4px 8px'}} title="Duplicate" onClick={()=>duplicateLoad(ld.id)}>⊕ Dupe</button>
+                      <button style={{...btnG,...btnSm,fontSize:10,padding:'4px 8px'}} onClick={()=>{setEditingLoad(ld);setLoadModalMode('edit');setShowLoadModal(true);}}>Edit</button>
+                      <button style={{...btnD,padding:'4px 8px',fontSize:10}} onClick={()=>{if(window.confirm(`Delete "${ld.loadName}"?`))deleteLoad(ld.id);}}>Del</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Modals */}
       {showSess && <SessionModal firearms={firearms} suppressors={suppressors} existing={editSess} onSave={saveSess} onClose={()=>{setShowSess(false);setEditSess(null);}}/>}
       {showFA && <FirearmModal existing={editFA} onSave={saveFA} onClose={()=>{setShowFA(false);setEditFA(null);}}/>}
       {showSupp && <SuppressorModal existing={editSupp} onSave={saveSupp} onClose={()=>{setShowSupp(false);setEditSupp(null);}}/>}
+      {showLoadModal && (
+        <LoadModal
+          mode={loadModalMode}
+          existing={editingLoad}
+          onSave={saveLoad}
+          onDuplicate={duplicateLoad}
+          onClose={()=>{
+            if(loadModalMode==='view'){setShowLoadModal(false);setEditingLoad(null);}
+            else{setShowLoadModal(false);setEditingLoad(null);}
+          }}
+        />
+      )}
     </div>
   );
 }
